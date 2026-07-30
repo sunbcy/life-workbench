@@ -3,22 +3,40 @@ import type { ApiResponse } from '@/types'
 
 const BASE_URL = '/api'
 
+type ApiUrl = string | (() => string) | Ref<string>
+
 interface UseApiOptions {
   immediate?: boolean
 }
 
-export function useApi<T = any>(url: string | (() => string), options: UseApiOptions = {}) {
+function resolveUrl(url: ApiUrl): string {
+  if (typeof url === 'string') return url
+  if (typeof url === 'function') return url()
+  return url.value
+}
+
+async function doFetch<T>(fullUrl: string): Promise<ApiResponse<T>> {
+  const response = await fetch(fullUrl)
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(text || `HTTP ${response.status}`)
+  }
+
+  return response.json()
+}
+
+export function useApi<T = any>(url: ApiUrl, options: UseApiOptions = {}) {
   const data: Ref<T | null> = ref(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  async function fetch(params?: Record<string, any>) {
+  async function execute(params?: Record<string, any>) {
     loading.value = true
     error.value = null
 
     try {
-      const resolvedUrl = typeof url === 'function' ? url() : url
-      let fullUrl = `${BASE_URL}${resolvedUrl}`
+      let fullUrl = `${BASE_URL}${resolveUrl(url)}`
 
       if (params) {
         const searchParams = new URLSearchParams()
@@ -31,8 +49,7 @@ export function useApi<T = any>(url: string | (() => string), options: UseApiOpt
         if (qs) fullUrl += `?${qs}`
       }
 
-      const response = await fetch(fullUrl)
-      const json: ApiResponse<T> = await response.json()
+      const json = await doFetch<T>(fullUrl)
 
       if (json.code === 0) {
         data.value = json.data
@@ -47,25 +64,24 @@ export function useApi<T = any>(url: string | (() => string), options: UseApiOpt
   }
 
   if (options.immediate !== false) {
-    fetch()
+    execute()
   }
 
-  return { data, loading, error, fetch, refetch: fetch }
+  return { data, loading, error, fetch: execute, refetch: execute }
 }
 
-export function useApiList<T = any>(baseUrl: string | (() => string)) {
+export function useApiList<T = any>(baseUrl: ApiUrl) {
   const list: Ref<T[]> = ref([])
   const total = ref(0)
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  async function fetch(params?: Record<string, any>) {
+  async function execute(params?: Record<string, any>) {
     loading.value = true
     error.value = null
 
     try {
-      const resolvedUrl = typeof baseUrl === 'function' ? baseUrl() : baseUrl
-      let fullUrl = `${BASE_URL}${resolvedUrl}`
+      let fullUrl = `${BASE_URL}${resolveUrl(baseUrl)}`
 
       if (params) {
         const searchParams = new URLSearchParams()
@@ -78,8 +94,7 @@ export function useApiList<T = any>(baseUrl: string | (() => string)) {
         if (qs) fullUrl += `?${qs}`
       }
 
-      const response = await fetch(fullUrl)
-      const json = await response.json()
+      const json = await doFetch<T[]>(fullUrl)
 
       if (json.code === 0) {
         list.value = json.data || []
@@ -94,7 +109,7 @@ export function useApiList<T = any>(baseUrl: string | (() => string)) {
     }
   }
 
-  fetch()
+  execute()
 
-  return { list, total, loading, error, fetch, refetch: fetch }
+  return { list, total, loading, error, fetch: execute, refetch: execute }
 }

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { usePersonalization } from '@/composables/usePersonalization'
 import type { Recommendation } from '@/types'
 
 const props = defineProps<{
   recommendation?: Recommendation
 }>()
 
+const { enabled: personalizedEnabled } = usePersonalization()
 const showTooltip = ref(false)
 
 function scorePct(score: number): string {
@@ -29,8 +31,17 @@ function dimLabel(key: string): string {
 
 <template>
   <div v-if="recommendation?.personalized" class="relative inline-flex items-center gap-1">
+    <!-- 个性化关闭时显示热门标签 -->
+    <div
+      v-if="!personalizedEnabled"
+      class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-orange-50 dark:bg-orange-500/10 text-orange-700 dark:text-orange-300"
+    >
+      <span class="text-[10px] font-semibold">🔥 热门</span>
+    </div>
+
     <!-- 匹配度圆点 -->
     <div
+      v-else
       @mouseenter="showTooltip = true"
       @mouseleave="showTooltip = false"
       class="flex items-center gap-1.5 px-2 py-0.5 rounded-full cursor-help transition-colors"

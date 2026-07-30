@@ -68,12 +68,7 @@ def create_price_service():
 
 
 def create_nearby_service():
-    """创建周边资源服务实例"""
+    """创建周边资源服务实例（委托给可插拔的 POI 数据源）"""
     config = get_config()
-    ds = config.get("datasource", {}).get("nearby", {})
-    provider = ds.get("provider", "mock")
-
-    from .nearby_service import MockNearbyService
-
-    # 未来可扩展: if provider == "amap" -> return AmapNearbyService(ds)
-    return MockNearbyService(ds)
+    from .nearby_service import NearbyService
+    return NearbyService(config)

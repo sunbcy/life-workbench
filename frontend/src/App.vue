@@ -1,12 +1,39 @@
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import Sidebar from '@/components/layout/Sidebar.vue'
 import Header from '@/components/layout/Header.vue'
 import { useTheme } from '@/composables/useTheme'
 import { useSidebar } from '@/composables/useSidebar'
+import { useLocation } from '@/composables/useLocation'
 
 // 初始化主题
 useTheme()
 const { isOpen: sidebarOpen, close: closeSidebar } = useSidebar()
+
+// 初始化实时定位（设备 GPS → 网络 IP → 后端默认），并上报后端用于周边/推荐计算
+const { init: initLocation } = useLocation()
+onMounted(() => { initLocation() })
+
+// 路由切换时的页面级遮罩：点击导航/快捷操作后给出明确的"正在切换"反馈
+const router = useRouter()
+const navMask = ref(false)
+let firstNav = true
+let navTimer: ReturnType<typeof setTimeout> | undefined
+
+router.beforeEach(() => {
+  if (firstNav) {
+    firstNav = false
+    return true
+  }
+  navMask.value = true
+  return true
+})
+router.afterEach(() => {
+  // 保持至少 280ms 让遮罩可见，避免瞬间消失看不出反馈
+  clearTimeout(navTimer)
+  navTimer = setTimeout(() => { navMask.value = false }, 280)
+})
 </script>
 
 <template>
@@ -28,6 +55,16 @@ const { isOpen: sidebarOpen, close: closeSidebar } = useSidebar()
             <Sidebar class="h-full" />
           </div>
         </div>
+      </Transition>
+    </Teleport>
+
+    <!-- 路由切换遮罩：页面切换时整页轻微模糊+暗化，强化点击反馈 -->
+    <Teleport to="body">
+      <Transition name="nav-mask">
+        <div
+          v-if="navMask"
+          class="fixed inset-0 z-[60] bg-gray-900/10 backdrop-blur-[1px] pointer-events-none"
+        ></div>
       </Transition>
     </Teleport>
 
@@ -93,5 +130,15 @@ const { isOpen: sidebarOpen, close: closeSidebar } = useSidebar()
 }
 .animate-slide-in-left {
   animation: slide-in-left 0.25s ease;
+}
+
+/* 路由切换遮罩淡入淡出 */
+.nav-mask-enter-active,
+.nav-mask-leave-active {
+  transition: opacity 0.28s ease;
+}
+.nav-mask-enter-from,
+.nav-mask-leave-to {
+  opacity: 0;
 }
 </style>

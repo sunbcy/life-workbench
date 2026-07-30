@@ -70,6 +70,30 @@ class RecommendationEngine:
 
         return self.ranker.rank(items, item_type)
 
+    def score_mixed(self, items: list[dict]) -> list[dict]:
+        """
+        对带 _type 字段的混合内容列表一次性评分。
+
+        与逐条调用 recommend 相比，只计算一次用户向量，
+        避免对每条内容重复 vectorize 整份画像（feed 接口有 30+ 条内容，
+        逐条调用会把用户向量重算 30+ 次）。
+
+        注意：会就地弹出每项中的 _type 字段，保持响应结构与 recommend 一致。
+        """
+        if not items:
+            return items
+
+        user_vector = self.user_vectorizer.vectorize(self.profile_loader.profile)
+
+        for item in items:
+            item_type = item.pop("_type", "news")
+            item_vector = self.item_vectorizer.vectorize(item, item_type)
+            item["_recommendation"] = self.scorer.score(
+                user_vector, item_vector, item, item_type
+            )
+
+        return items
+
 
 # 全局单例
 _engine: RecommendationEngine | None = None

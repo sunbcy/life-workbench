@@ -33,10 +33,12 @@ async def get_personalized_feed(
     for r in nearby_resources:
         all_items.append({**r, "_type": "nearby"})
 
-    # 个性化评分
-    for item in all_items:
-        item_type = item.pop("_type")
-        engine.recommend([item], item_type)
+    # 个性化评分：一次性计算用户向量后批量打分
+    # （逐条 engine.recommend 会把用户画像向量重算 30+ 次，是此接口变慢的主因）
+    # 先按用户真实位置重算周边资源的 distance，使地理位置评分基于真实距离
+    from services import geolocation
+    geolocation.apply_real_distance(all_items)
+    engine.score_mixed(all_items)
 
     # 根据策略调整权重
     for item in all_items:

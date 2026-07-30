@@ -167,6 +167,9 @@ export interface NearbyResource {
   tags: string[]
   phone: string | null
   features: string[]
+  lat?: number
+  lng?: number
+  source?: string
   _recommendation?: Recommendation
 }
 

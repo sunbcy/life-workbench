@@ -50,6 +50,16 @@ datasource:
       - "叮咚买菜"
       - "永辉超市"
 
-  # 周边资源 (暂无真实数据源，可接入高德/百度地图POI)
+  # 周边资源 (可接入高德/百度地图真实 POI)
+  # provider: mock (默认, 内置深圳南山数据) | amap (高德) | baidu (百度)
+  # 未配置对应 API Key 时自动回退到 mock，保证页面可用
   nearby:
     provider: "mock"
+    amap_key: ""                 # 高德 Web 服务 Key (https://lbs.amap.com/)
+    baidu_key: ""                # 百度地图 AK (https://lbsyun.baidu.com/)
+
+  # 地图 API 密钥（也可直接写在 nearby 下，二选一）
+  # amap:
+  #   api_key: "你的高德Key"
+  # baidu:
+  #   api_key: "你的百度AK"

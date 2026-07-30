@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useApi } from '@/composables/useApi'
 import { useSidebar } from '@/composables/useSidebar'
+import { usePersonalization } from '@/composables/usePersonalization'
+import { useLocation } from '@/composables/useLocation'
 import type { ProfileSummary } from '@/types'
 
 const route = useRoute()
@@ -28,12 +30,12 @@ function navigate(path: string) {
 // 画像状态 — 延迟 2 秒加载，减少首屏并发请求
 const { data: profile, fetch: fetchProfile } = useApi<ProfileSummary>('/profile/summary', { immediate: false })
 setTimeout(() => fetchProfile(), 2000)
-const personalizedEnabled = ref(true)
 
-function togglePersonalization() {
-  personalizedEnabled.value = !personalizedEnabled.value
-  window.location.reload()
-}
+// 全局个性化开关（持久化到 localStorage）
+const { enabled: personalizedEnabled, toggle: togglePersonalization } = usePersonalization()
+
+// 实时定位（设备 GPS / 网络 IP / 默认）
+const { label: locationLabel, sourceLabel: locationSource, status: locationStatus, locate: refreshLocation } = useLocation()
 </script>
 
 <template>
@@ -101,15 +103,18 @@ function togglePersonalization() {
           </div>
           <button
             @click="togglePersonalization"
+            type="button"
+            role="switch"
+            :aria-checked="personalizedEnabled"
             :class="[
-              'relative w-9 h-5 rounded-full transition-colors duration-200',
+              'relative inline-flex w-11 h-6 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800',
               personalizedEnabled ? 'bg-primary-500' : 'bg-gray-300 dark:bg-gray-600'
             ]"
           >
             <span
               :class="[
-                'absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200',
-                personalizedEnabled ? 'translate-x-4' : 'translate-x-0.5'
+                'inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200',
+                personalizedEnabled ? 'translate-x-5' : 'translate-x-1'
               ]"
             ></span>
           </button>
@@ -132,14 +137,29 @@ function togglePersonalization() {
         </div>
       </router-link>
 
-      <!-- 位置 -->
+      <!-- 位置（实时定位：设备GPS / 网络IP / 默认） -->
       <div class="flex items-center gap-3 px-2 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-700/50">
         <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center text-sm shadow-sm">
           📍
         </div>
         <div class="flex-1 min-w-0">
-          <p class="text-xs font-medium text-gray-900 dark:text-white truncate">深圳市 · 南山区</p>
-          <p class="text-[10px] text-gray-400 dark:text-gray-500">当前定位</p>
+          <p class="text-xs font-medium text-gray-900 dark:text-white truncate">{{ locationLabel }}</p>
+          <p class="text-[10px] text-gray-400 dark:text-gray-500 flex items-center gap-1">
+            {{ locationSource }} · 当前定位
+            <button
+              @click="refreshLocation(true)"
+              class="ml-0.5 w-3.5 h-3.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center justify-center"
+              :title="locationStatus === 'locating' ? '定位中…' : '刷新定位'"
+            >
+              <svg
+                class="w-3 h-3"
+                :class="locationStatus === 'locating' ? 'animate-spin' : ''"
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h5M20 20v-5h-5M4 20h5v-5M20 4h-5v5" />
+              </svg>
+            </button>
+          </p>
         </div>
       </div>
     </div>

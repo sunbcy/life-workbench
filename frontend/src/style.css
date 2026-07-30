@@ -124,3 +124,23 @@
     text-wrap: balance;
   }
 }
+
+/* --- 点击水波纹遮罩（全局自动作用于所有 button） ---
+   通过 main.ts 全局监听 pointerdown 注入 .ripple-mask 子元素，
+   isolation 保证遮罩被限制在按钮自身堆叠上下文内（不会跑到卡片背景后面），
+   z-index:-1 让遮罩浮在按钮背景之上、文字之下。 */
+.ripple-mask {
+  position: absolute;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.3;
+  transform: scale(0);
+  pointer-events: none;
+  z-index: -1;
+  animation: ripple-spread 0.55s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes ripple-spread {
+  0%   { transform: scale(0);    opacity: 0.3; }
+  100% { transform: scale(2.4);  opacity: 0; }
+}

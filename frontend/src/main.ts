@@ -6,6 +6,29 @@ import './style.css'
 const app = createApp(App)
 app.use(router)
 
+// 全局点击水波纹遮罩：自动作用于页面上所有 <button>，无需逐个组件接入
+function createRipple(e: PointerEvent) {
+  const target = (e.target as HTMLElement | null)?.closest('button')
+  if (!target) return
+  const el = target as HTMLElement
+  const rect = el.getBoundingClientRect()
+  const size = Math.max(rect.width, rect.height)
+  // 确保按钮能容纳并裁剪水波纹
+  const cs = getComputedStyle(el)
+  if (cs.position === 'static') el.style.position = 'relative'
+  el.style.overflow = 'hidden'
+  el.style.isolation = 'isolate'
+
+  const span = document.createElement('span')
+  span.className = 'ripple-mask'
+  span.style.width = span.style.height = `${size}px`
+  span.style.left = `${e.clientX - rect.left - size / 2}px`
+  span.style.top = `${e.clientY - rect.top - size / 2}px`
+  span.addEventListener('animationend', () => span.remove())
+  el.appendChild(span)
+}
+document.addEventListener('pointerdown', createRipple)
+
 // 全局错误捕获 — 防止模板渲染错误导致白屏
 app.config.errorHandler = (err, instance, info) => {
   console.error('[Vue Error]', err)

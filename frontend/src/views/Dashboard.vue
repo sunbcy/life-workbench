@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '@/composables/useApi'
+import { usePersonalization } from '@/composables/usePersonalization'
 import ProfileBadge from '@/components/feed/ProfileBadge.vue'
 import FeedCard from '@/components/feed/FeedCard.vue'
 import WeatherWidget from '@/components/dashboard/WeatherWidget.vue'
@@ -13,6 +14,19 @@ const router = useRouter()
 // Mix strategy for feed
 const feedMix = ref<'balanced' | 'trending' | 'personal'>('balanced')
 const feedSize = ref(10)
+
+// 全局个性化开关：关闭时自动切到热门排序，并记住上次的 mix
+const { enabled: personalizedEnabled } = usePersonalization()
+const lastMix = ref<'balanced' | 'trending' | 'personal'>(feedMix.value)
+
+watch(personalizedEnabled, (enabled) => {
+  if (!enabled) {
+    lastMix.value = feedMix.value
+    feedMix.value = 'trending'
+  } else {
+    feedMix.value = lastMix.value === 'trending' ? 'balanced' : lastMix.value
+  }
+})
 
 // Personalized feed
 const feedUrl = computed(() => `/feed/personalized?size=${feedSize.value}&mix=${feedMix.value}`)
@@ -86,35 +100,59 @@ const mixOptions = [
 
     <!-- 推荐流 -->
     <div class="mb-6">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+      <div class="flex flex-wrap items-center justify-between gap-y-2 mb-4">
+        <h3 class="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2 min-w-0">
           <span>✨</span> 为你推荐
-          <span v-if="stats" class="text-[10px] text-gray-400 font-normal">
+          <span v-if="stats" class="text-[10px] text-gray-400 font-normal truncate">
             · 今日已省 ¥{{ stats.price_saved_today }}
           </span>
         </h3>
 
-        <!-- 混合策略切换 -->
-        <div class="flex items-center gap-1">
-          <button
-            v-for="opt in mixOptions"
-            :key="opt.value"
-            @click="feedMix = opt.value"
-            :class="[
-              'text-[10px] px-2.5 py-1 rounded-lg font-medium transition-all',
-              feedMix === opt.value
-                ? 'bg-primary-500 text-white shadow-sm'
-                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-            ]"
-            :title="opt.desc"
+        <!-- 混合策略切换（分段控件，选中态用实心底色，保证点击前后差异明显） -->
+        <div class="flex items-center gap-2">
+          <div class="inline-flex items-center p-1 rounded-xl bg-gray-100 dark:bg-gray-800 gap-1">
+            <button
+              v-for="opt in mixOptions"
+              :key="opt.value"
+              :disabled="!personalizedEnabled"
+              @click="feedMix = opt.value"
+              :class="[
+                'text-[11px] px-3 py-1.5 rounded-lg font-medium transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed',
+                feedMix === opt.value
+                  ? 'bg-primary-500 text-white shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+              ]"
+              :title="opt.desc"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+        <!-- 切换策略时的轻量反馈：保留列表，只提示更新中 -->
+        <Transition name="fade">
+          <span
+            v-if="feedLoading && feedItems && feedItems.length"
+            class="flex items-center gap-1 text-[10px] text-primary-500 whitespace-nowrap"
           >
-            {{ opt.label }}
-          </button>
-        </div>
+            <span class="w-1.5 h-1.5 rounded-full bg-primary-500 animate-pulse"></span>
+            更新中
+          </span>
+        </Transition>
       </div>
 
-      <!-- 加载 -->
-      <div v-if="feedLoading" class="space-y-3">
+      <!-- 个性化关闭提示 -->
+      <Transition name="fade">
+        <div
+          v-if="!personalizedEnabled"
+          class="mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs flex items-center gap-2"
+        >
+          <span>🔕</span>
+          <span>个性化推荐已关闭，当前按热度排序。可在侧边栏重新开启。</span>
+        </div>
+      </Transition>
+    </div>
+
+    <!-- 加载（仅首次加载显示骨架，切换策略时保留列表避免整列闪烁） -->
+      <div v-if="feedLoading && !feedItems" class="space-y-3">
         <div v-for="i in 5" :key="i" class="card p-5 animate-pulse">
           <div class="flex gap-3">
             <div class="w-11 h-11 bg-gray-100 dark:bg-gray-700 rounded-xl"></div>
@@ -155,3 +193,14 @@ const mixOptions = [
     </div>
   </div>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

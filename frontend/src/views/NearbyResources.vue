@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useApiList } from '@/composables/useApi'
+import { useLocation } from '@/composables/useLocation'
 import ResourceCard from '@/components/nearby/ResourceCard.vue'
 import type { NearbyResource, NearbyCategory } from '@/types'
 
 const { list: categories } = useApiList<NearbyCategory>('/nearby/categories')
 const { list: resources, total, loading, fetch } = useApiList<NearbyResource>('/nearby/resources')
+const { updatedAt } = useLocation()
+
+// 定位更新后，基于真实坐标重新拉取周边（距离/排序会随之变化）
+watch(updatedAt, () => fetchData())
 
 // 筛选状态
 const activeCategory = ref('all')
@@ -62,6 +67,14 @@ const sortOptions = [
 ]
 
 const radiusOptions = [1, 3, 5, 10]
+
+// 数据来源标识（来自后端 POI provider）
+const dataSource = computed(() => resources.value[0]?.source || '')
+const dataSourceLabel = computed(() => {
+  if (dataSource.value === 'amap') return '高德地图'
+  if (dataSource.value === 'baidu') return '百度地图'
+  return '内置示例数据'
+})
 </script>
 
 <template>
@@ -167,9 +180,19 @@ const radiusOptions = [1, 3, 5, 10]
     </div>
 
     <div v-else>
-      <div class="text-xs text-gray-400 mb-4">
-        搜索半径 <span class="font-semibold text-gray-600 dark:text-gray-300">{{ radius }}km</span> 内，
-        找到 <span class="font-semibold text-gray-600 dark:text-gray-300">{{ total }}</span> 个资源
+      <div class="text-xs text-gray-400 mb-4 flex items-center gap-2 flex-wrap">
+        <span>
+          搜索半径 <span class="font-semibold text-gray-600 dark:text-gray-300">{{ radius }}km</span> 内，
+          找到 <span class="font-semibold text-gray-600 dark:text-gray-300">{{ total }}</span> 个资源
+        </span>
+        <span
+          class="px-2 py-0.5 rounded-full text-[10px]"
+          :class="dataSource === 'amap' || dataSource === 'baidu'
+            ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+            : 'bg-gray-100 dark:bg-gray-700 text-gray-500'"
+        >
+          数据来源：{{ dataSourceLabel }}
+        </span>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

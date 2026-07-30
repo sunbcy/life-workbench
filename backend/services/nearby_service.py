@@ -1,45 +1,64 @@
 """
-周边资源服务 - Mock 实现（未来可扩展高德/百度地图 POI 实现）
+周边资源服务
+
+委托给可插拔的 POI 数据源（高德 / 百度 / Mock）。
+- 按用户「真实位置」(WGS-84) 请求周边 POI；
+- 真实数据源未配置 Key 或请求失败时，自动回退到 Mock，保证页面可用；
+- 结果做 5 分钟内存缓存，降低地图 API 调用频率。
 """
+from __future__ import annotations
+
+import time
+from typing import Optional
+
+from . import get_config, geolocation
+from .poi import create_poi_provider, MockPOIProvider
 
 
-class MockNearbyService:
-    """使用内置 mock 数据"""
-
+class NearbyService:
     def __init__(self, config: dict | None = None):
-        self.config = config or {}
+        self.config = config or get_config()
+        self.provider = create_poi_provider(self.config)
+        self._cache: dict = {}
+        self._cache_ttl = 300  # 秒
 
     async def get_categories(self) -> list[dict]:
-        from api.data import nearby_categories
-        return nearby_categories
+        return await self.provider.get_categories()
 
     async def get_resources(
         self, category: str = "all", keyword: str = "",
         sort: str = "distance", radius: float = 5.0
     ) -> dict:
-        from api.data import nearby_resources
-        resources = list(nearby_resources)
+        loc = geolocation.get_location()
+        lat, lng = loc["lat"], loc["lng"]
+        radius_m = int(radius * 1000)
 
-        resources = [r for r in resources if r["distance"] <= radius]
-        if category and category != "all":
-            resources = [r for r in resources if r["category"] == category]
-        if keyword:
-            kw = keyword.lower()
-            resources = [
-                r for r in resources
-                if kw in r["name"].lower() or kw in r["address"].lower()
-                or any(kw in t.lower() for t in r.get("tags", []))
-            ]
-        if sort == "distance":
-            resources.sort(key=lambda r: r["distance"])
-        elif sort == "rating":
-            resources.sort(key=lambda r: r["rating"], reverse=True)
-        elif sort == "popularity":
-            resources.sort(key=lambda r: r["review_count"], reverse=True)
+        cache_key = (
+            type(self.provider).__name__,
+            round(lat, 4), round(lng, 4), radius_m, category, keyword,
+        )
+        now = time.time()
+        hit = self._cache.get(cache_key)
+        if hit and now - hit[1] < self._cache_ttl:
+            resources = hit[0]
+        else:
+            resources = await self._fetch(self.provider, lat, lng, radius_m, category, keyword)
+            # 真实数据源失败/无数据 -> 自动回退 Mock
+            if not resources and not isinstance(self.provider, MockPOIProvider):
+                resources = await self._fetch(
+                    MockPOIProvider(self.config), lat, lng, radius_m, category, keyword
+                )
+            self._cache[cache_key] = (resources, now)
 
         return {"resources": resources, "total": len(resources)}
 
-    async def get_resource_detail(self, resource_id: int) -> dict | None:
+    async def _fetch(self, provider, lat, lng, radius_m, category, keyword) -> list[dict]:
+        try:
+            return await provider.search(lat, lng, radius_m, category, keyword)
+        except Exception:
+            return []
+
+    async def get_resource_detail(self, resource_id: int) -> Optional[dict]:
         from api.data import nearby_resources
         for r in nearby_resources:
             if r["id"] == resource_id:

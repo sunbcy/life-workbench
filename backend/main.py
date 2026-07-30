@@ -13,6 +13,7 @@ from api.news import router as news_router
 from api.weather import router as weather_router
 from api.profile import router as profile_router
 from api.feed import router as feed_router
+from api.location import router as location_router
 from api.data import dashboard_stats, quick_actions
 from services.recommendation import get_engine
 
@@ -46,13 +47,15 @@ app.include_router(news_router)
 app.include_router(weather_router)
 app.include_router(profile_router)
 app.include_router(feed_router)
+app.include_router(location_router)
 
 # 初始化推荐引擎（启动时加载用户画像）
+# 注意：print 内容不要带 emoji，否则在 Windows GBK 终端会抛 UnicodeEncodeError 导致进程退出
 try:
     get_engine()
-    print("✅ 推荐引擎已初始化 - 用户画像已加载")
+    print("[OK] 推荐引擎已初始化 - 用户画像已加载")
 except Exception as e:
-    print(f"⚠️ 推荐引擎初始化失败: {e}")
+    print(f"[WARN] 推荐引擎初始化失败: {e}")
 
 
 # ========== 仪表盘 API ==========
