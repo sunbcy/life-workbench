@@ -1,0 +1,55 @@
+# 生活工作台配置文件
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true
+
+app:
+  name: "生活工作台"
+  version: "1.0.0"
+  description: "基于地理位置的生活比价与资源发现平台"
+
+# 模拟位置 (可配置GPS或手动设置)
+location:
+  city: "深圳"
+  district: "南山区"
+  latitude: 22.5431
+  longitude: 113.9298
+
+# 数据源配置 - provider 可选: mock | 真实API
+datasource:
+  # 天气服务
+  # provider: mock (默认) | qweather (和风天气，需注册免费API Key)
+  weather:
+    provider: "mock"           # 改为 "qweather" 启用真实天气
+    update_interval: 1800       # 30分钟
+    api_key: ""                 # 和风天气 API Key (devapi.qweather.com)
+    location_id: "101280604"    # 深圳南山
+
+  # 新闻服务
+  # provider: mock (默认) | rss (RSS聚合，无需API Key)
+  news:
+    provider: "mock"            # 改为 "rss" 启用真实新闻
+    update_interval: 600        # 10分钟
+    rss:
+      cache_ttl: 300            # RSS缓存时间(秒)
+      sources:
+        - url: "https://sspai.com/feed"
+          category: "tech"
+        - url: "https://www.36kr.com/feed"
+          category: "tech"
+
+  # 比价服务 (暂无真实数据源)
+  price:
+    provider: "mock"
+    stores:
+      - "沃尔玛"
+      - "盒马鲜生"
+      - "美团优选"
+      - "朴朴超市"
+      - "叮咚买菜"
+      - "永辉超市"
+
+  # 周边资源 (暂无真实数据源，可接入高德/百度地图POI)
+  nearby:
+    provider: "mock"

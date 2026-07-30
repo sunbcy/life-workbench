@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>生活工作台</title>
+  </head>
+  <body class="bg-gray-50 dark:bg-gray-900">
+    <!-- 初始加载骨架屏 → Vue mount 时自动替换整个 #app 内容 -->
+    <div id="app">
+      <div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;">
+        <div style="width:40px;height:40px;border:3px solid #e5e7eb;border-top-color:#8b5cf6;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+        <p style="font-size:14px;color:#9ca3af;">生活工作台加载中...</p>
+      </div>
+      <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
