@@ -189,7 +189,7 @@ const sortOptions = [
           class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
           @click.self="closeDetail"
         >
-          <div class="absolute inset-0 bg-black/40 backdrop-blur-sm"></div>
+          <div class="absolute inset-0 bg-black/40 backdrop-blur-sm cursor-pointer" @click="closeDetail"></div>
 
           <div class="relative w-full max-w-lg max-h-[85vh] overflow-y-auto card animate-slide-up">
             <button

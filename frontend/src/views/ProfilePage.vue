@@ -344,7 +344,7 @@ function weightBarClass(weight: number): string {
           class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
           @click.self="closeEditor"
         >
-          <div class="absolute inset-0 bg-black/40 backdrop-blur-sm"></div>
+          <div class="absolute inset-0 bg-black/40 backdrop-blur-sm cursor-pointer" @click="closeEditor"></div>
 
           <div class="relative w-full max-w-2xl max-h-[90vh] card flex flex-col animate-slide-up">
             <!-- 标题栏 -->

@@ -164,7 +164,7 @@ const avgSave = computed(() => {
           @click.self="closeDetail"
         >
           <!-- 遮罩 -->
-          <div class="absolute inset-0 bg-black/40 backdrop-blur-sm"></div>
+          <div class="absolute inset-0 bg-black/40 backdrop-blur-sm cursor-pointer" @click="closeDetail"></div>
 
           <!-- 弹窗 -->
           <div class="relative w-full max-w-lg max-h-[85vh] overflow-y-auto card animate-slide-up">
