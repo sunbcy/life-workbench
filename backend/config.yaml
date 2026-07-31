@@ -19,17 +19,36 @@ location:
 # 数据源配置 - provider 可选: mock | 真实API
 datasource:
   # 天气服务
-  # provider: mock (默认) | qweather (和风天气，需注册免费API Key)
+  # provider: mock (默认) | qweather (和风天气)
+  # 推荐使用 JWT 认证（Ed25519），旧 API Key 方式即将废弃
   weather:
-    provider: "mock"           # 改为 "qweather" 启用真实天气
-    update_interval: 1800       # 30分钟
-    api_key: ""                 # 和风天气 API Key (devapi.qweather.com)
-    location_id: "101280604"    # 深圳南山
+    provider: "qweather"
+    update_interval: 1800          # 30分钟
+    location_id: "101280604"       # 深圳南山 (LocationID)
+
+    # ---- JWT 认证 (推荐，api_key 留空则自动使用此方式) ----
+    # 获取方法:
+    #   1. 登录 https://console.qweather.com
+    #   2. 项目管理 → 添加凭据 → 认证方式选 "JSON Web Token"
+    #   3. 用 openssl 生成 Ed25519 密钥对:
+    #        openssl genpkey -algorithm ED25519 -out ed25519-private.pem
+    #        openssl pkey -pubout -in ed25519-private.pem > ed25519-public.pem
+    #   4. 将公钥内容粘贴到控制台，保存后获得凭据ID(credential_id)和项目ID(project_id)
+    #   5. 将私钥内容填到下方 private_key 字段
+    auth_method: "jwt"             # jwt | key
+    api_host: "ma4bjcj5fj.re.qweatherapi.com"                   # 你的独立 API Host(控制台查看)，留空使用默认 devapi.qweather.com
+    project_id: "2BKUHG2GVB"                 # 项目 ID (JWT payload 的 sub)
+    credential_id: "K7PT9DAX5U"              # 凭据 ID (JWT header 的 kid)
+    private_key: "MC4CAQAwBQYDK2VwBCIEIDKs3nPGm4WlX0Ce86H9D/poxWCktLPBj0v2t9dSiEpe
+"                # Ed25519 私钥 PEM (多行字符串，用 | 开头)
+
+    # ---- 旧 API Key 认证 (auth_method=key 时使用，即将废弃) ----
+    api_key: ""
 
   # 新闻服务
   # provider: mock (默认) | rss (RSS聚合，无需API Key)
   news:
-    provider: "mock"            # 改为 "rss" 启用真实新闻
+    provider: "rss"            # 改为 "rss" 启用真实新闻
     update_interval: 600        # 10分钟
     rss:
       cache_ttl: 300            # RSS缓存时间(秒)
@@ -54,8 +73,8 @@ datasource:
   # provider: mock (默认, 内置深圳南山数据) | amap (高德) | baidu (百度)
   # 未配置对应 API Key 时自动回退到 mock，保证页面可用
   nearby:
-    provider: "mock"
-    amap_key: ""                 # 高德 Web 服务 Key (https://lbs.amap.com/)
+    provider: "amap"
+    amap_key: "133629ce8a986cbf8820c0aa5dae02c8"                 # 高德 Web 服务 Key (https://lbs.amap.com/)
     baidu_key: ""                # 百度地图 AK (https://lbsyun.baidu.com/)
 
   # 地图 API 密钥（也可直接写在 nearby 下，二选一）

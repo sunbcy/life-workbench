@@ -29,3 +29,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# QWeather keys
+ed25519-*.pem

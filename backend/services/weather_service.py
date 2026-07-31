@@ -3,9 +3,14 @@
 """
 
 import logging
+import traceback as _traceback
+import json as _json
 from datetime import datetime
 
 log = logging.getLogger(__name__)
+
+# 可通过环境变量开启调试模式（打印完整请求/响应）
+DEBUG = False  # 设为 True 可在成功时也打印请求详情
 
 
 # ============================================================
@@ -36,10 +41,14 @@ class MockWeatherService:
 
 
 # ============================================================
-# 和风天气 (QWeather) 真实 API 服务
+# 和风天气 (QWeather) 真实 API 服务 — 支持 JWT + API Key 双模式
 # ============================================================
 
-QWATHER_BASE = "https://devapi.qweather.com/v7"
+import time as _time
+from services._qweather_jwt import qweather_jwt as _qweather_jwt
+
+# 默认 API 基地址（和风天气可能为每个开发者分配独立 host）
+QWATHER_DEFAULT_HOST = "https://devapi.qweather.com/v7"
 
 # 和风天气 condition code → 中文映射
 CONDITION_MAP = {
@@ -81,26 +90,233 @@ ICON_MAP = {
 }
 
 
+class QWeatherError(Exception):
+    """和风天气 API 错误基类"""
+
+
+class QWeatherPermissionError(QWeatherError):
+    """订阅权限不足 (403 No permission) — 当前套餐不含此端点"""
+
+
+def _safe_json_or_text(data: bytes | str) -> str:
+    """尝试将响应体解析为 JSON 并格式化，失败则返回原始文本"""
+    if isinstance(data, bytes):
+        try:
+            text = data.decode("utf-8", errors="replace")
+        except Exception:
+            return f"<binary {len(data)} bytes>"
+    else:
+        text = str(data)
+    try:
+        obj = _json.loads(text)
+        return _json.dumps(obj, ensure_ascii=False, indent=2)
+    except Exception:
+        return text[:2000]  # 截断过长文本
+
+
+def _format_traceback(exc: Exception, *, prefix: str = "") -> str:
+    """格式化异常信息，包含完整调用栈"""
+    tb_lines = _traceback.format_exception(type(exc), exc, exc.__traceback__)
+    tb_text = "".join(tb_lines).rstrip()
+    if prefix:
+        tb_text = f"{prefix}\n{tb_text}"
+    return tb_text
+
+
 class QWeatherService:
-    """和风天气 API v7 实现"""
+    """和风天气 API v7 实现
+    支持两种认证方式：
+      - JWT (推荐): Ed25519 签名, Authorization: Bearer <token>
+      - API Key (旧): URL 参数 ?key=xxx 或 X-QW-Api-Key 头
+    当 api_key 为空且配置了 private_key 时自动使用 JWT。
+    """
 
     def __init__(self, config: dict | None = None):
         self.config = config or {}
         self.api_key = self.config.get("api_key", "")
         self.location_id = self.config.get("location_id", "101280604")
 
+        # JWT 配置
+        self._use_jwt = False
+        self._jwt_token: str | None = None
+        self._jwt_expiry: float = 0
+
+        auth_method = self.config.get("auth_method", "")
+        self._project_id = self.config.get("project_id", "")
+        self._credential_id = self.config.get("credential_id", "")
+        self._private_key = self.config.get("private_key", "").strip()
+        self._api_host = self.config.get("api_host", "").strip()
+
+        # 判断认证方式: 显式 jwt 或 有私钥但无 api_key
+        if auth_method == "jwt" or (self._private_key and not self.api_key):
+            if self._private_key and self._project_id and self._credential_id:
+                self._use_jwt = True
+                log.info("QWeather 使用 JWT 认证 (Ed25519)")
+            else:
+                missing = []
+                if not self._private_key:
+                    missing.append("private_key")
+                if not self._project_id:
+                    missing.append("project_id")
+                if not self._credential_id:
+                    missing.append("credential_id")
+                log.warning(
+                    "QWeather JWT 配置不完整，缺少: %s。回退到 API Key 或 mock",
+                    ", ".join(missing),
+                )
+
     @property
-    def _params(self) -> dict:
-        return {"location": self.location_id, "key": self.api_key}
+    def _base_url(self) -> str:
+        """API 基地址: 自定义 host 或默认"""
+        if self._api_host:
+            host = self._api_host.rstrip("/")
+            return f"https://{host}/v7" if "/v7" not in host else f"https://{host}"
+        return QWATHER_DEFAULT_HOST
+
+    def _generate_jwt(self) -> str:
+        """生成和风天气 JWT Token (Ed25519 签名, 有效期 15 分钟, 纯 Python 实现)"""
+        return _qweather_jwt(
+            project_id=self._project_id,
+            credential_id=self._credential_id,
+            private_key_pem=self._private_key,
+            ttl=900,
+        )
+
+    def _get_jwt(self) -> str:
+        """获取有效的 JWT Token（缓存到过期前 60 秒）"""
+        now = _time.time()
+        if self._jwt_token is None or now > self._jwt_expiry - 60:
+            self._jwt_token = self._generate_jwt()
+            self._jwt_expiry = now + 900
+            log.debug(
+                "JWT token 已刷新 (project=%s, cred=%s, expiry=+900s)",
+                self._project_id,
+                self._credential_id,
+            )
+        return self._jwt_token
+
+    # ----------------------------------------------------------------
+    # 核心请求方法 — 带完整 traceback 和 HTTP 调试日志
+    # ----------------------------------------------------------------
 
     async def _fetch(self, endpoint: str) -> dict:
-        """调用和风天气 API"""
+        """调用和风天气 API，失败时输出完整 traceback + HTTP 请求/响应详情"""
         import httpx
-        url = f"{QWATHER_BASE}/{endpoint}"
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(url, params=self._params)
+
+        url = f"{self._base_url}/{endpoint}"
+        headers = {}
+        params = {"location": self.location_id}
+
+        if self._use_jwt:
+            token = self._get_jwt()
+            headers["Authorization"] = f"Bearer {token}"
+            auth_method = "JWT"
+        else:
+            params["key"] = self.api_key
+            headers["X-QW-Api-Key"] = self.api_key
+            auth_method = "API Key"
+
+        # 构建日志用的请求摘要（隐藏敏感信息）
+        req_summary = (
+            f"GET {url}\n"
+            f"  Auth: {auth_method}\n"
+            f"  Params: location={self.location_id}"
+            + (f", key={self.api_key[:8]}..." if not self._use_jwt and self.api_key else "")
+            + f"\n  Host header target: {url.split('/')[2]}"
+        )
+
+        if DEBUG:
+            log.info("和风天气请求:\n%s\n  Headers: %s", req_summary, {
+                k: (v[:20] + "..." if k == "Authorization" else v)
+                for k, v in headers.items()
+            })
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url, params=params, headers=headers)
+
+            # 成功
+            if resp.is_success:
+                if DEBUG:
+                    body_preview = _safe_json_or_text(resp.content)[:300]
+                    log.info(
+                        "和风天气响应 [%d]:\n  URL: %s\n  Body: %s",
+                        resp.status_code, url, body_preview,
+                    )
+                return resp.json()
+
+            # ---- HTTP 错误处理 ----
+
+            error_body = _safe_json_or_text(resp.content)
+
+            # 检测「订阅权限不足」403 — 这是预期中的情况，不用 error 级别
+            if resp.status_code == 403 and "No permission" in error_body:
+                log.info(
+                    "和风天气 [%d] 当前订阅不含此端点 (%s)，跳过\n"
+                    "  提示: 升级订阅后可获取此数据\n"
+                    "  URL: %s",
+                    resp.status_code, endpoint, url,
+                )
+                raise QWeatherPermissionError(
+                    f"端点 '{endpoint}' 需要更高订阅等级。"
+                    f"详情: {_json.loads(error_body).get('error', {}).get('detail', error_body)}"
+                    if error_body.startswith("{") else
+                    f"端点 '{endpoint}' 需要更高订阅等级"
+                )
+
+            # 其他 HTTP 错误
+            log.error(
+                "和风天气 API 返回错误 [%d %s]\n"
+                "  URL: %s\n"
+                "  Auth: %s\n"
+                "  Response Headers: %s\n"
+                "  Response Body:\n%s",
+                resp.status_code, resp.reason_phrase,
+                url,
+                auth_method,
+                dict(resp.headers),
+                error_body,
+            )
             resp.raise_for_status()
-            return resp.json()
+
+        except QWeatherPermissionError:
+            # 权限错误直接向上抛，让调用方决定如何处理
+            raise
+
+        except httpx.HTTPStatusError as e:
+            # raise_for_status 触发的异常
+            log.error(
+                "和风天气 HTTP 错误 — 完整 traceback:\n%s\n"
+                "请求摘要:\n%s",
+                _format_traceback(e),
+                req_summary,
+            )
+            raise
+
+        except (httpx.RequestError, httpx.TimeoutException) as e:
+            log.error(
+                "和风天气 网络/超时错误 — 完整 traceback:\n%s\n"
+                "请求摘要:\n%s",
+                _format_traceback(e),
+                req_summary,
+            )
+            raise
+
+        except Exception as e:
+            log.error(
+                "和风天气 未知错误 — 完整 traceback:\n%s\n"
+                "请求摘要:\n%s",
+                _format_traceback(e),
+                req_summary,
+            )
+            raise
+
+        # unreachable，满足类型检查
+        raise RuntimeError("unreachable")
+
+    # ----------------------------------------------------------------
+    # 天气数据获取 — 每个方法带独立 traceback + mock 回退
+    # ----------------------------------------------------------------
 
     async def get_current(self) -> dict:
         """获取当前天气"""
@@ -115,13 +331,16 @@ class QWeatherService:
                 "icon": ICON_MAP.get(now.get("icon", ""), "cloudy"),
                 "wind_speed": int(now.get("windSpeed", 0)),
                 "wind_direction": now.get("windDir", "未知"),
-                "uv_index": 0,  # 和风 now API 不含 UV，需单独调用
+                "uv_index": 0,
                 "visibility": int(now.get("vis", "10")),
-                "aqi": 0,  # 需单独调用 air/v7/now
+                "aqi": 0,
                 "aqi_level": "未知",
             }
         except Exception as e:
-            log.warning(f"和风天气 API 调用失败，回退到 mock: {e}")
+            log.warning(
+                "和风天气「实况」获取失败，回退到 mock。Traceback:\n%s",
+                _format_traceback(e),
+            )
             return await MockWeatherService().get_current()
 
     async def get_forecast(self) -> list[dict]:
@@ -140,11 +359,18 @@ class QWeatherService:
                 })
             return forecast
         except Exception as e:
-            log.warning(f"和风天气预报 API 失败，回退到 mock: {e}")
+            log.warning(
+                "和风天气「7天预报」获取失败，回退到 mock。Traceback:\n%s",
+                _format_traceback(e),
+            )
             return await MockWeatherService().get_forecast()
 
     async def get_alerts(self) -> list[dict]:
-        """获取天气预警"""
+        """获取天气预警
+
+        注意: 预警 API (warning/now) 是付费端点，免费订阅会返回 403。
+        此时不显示 mock 数据，而是如实告知用户需要升级订阅。
+        """
         try:
             data = await self._fetch("warning/now")
             alerts = []
@@ -155,8 +381,14 @@ class QWeatherService:
                     "message": w.get("text", ""),
                 })
             return alerts if alerts else [{"level": "正常", "type": "无预警", "message": "当前无气象预警"}]
+        except QWeatherPermissionError as e:
+            log.info("预警功能不可用: %s", e)
+            return [{"level": "info", "type": "功能未开通", "message": "天气预警需要升级和风天气订阅套餐"}]
         except Exception as e:
-            log.warning(f"和风天气预警 API 失败，回退到 mock: {e}")
+            log.warning(
+                "和风天气「预警」获取失败，回退到 mock。Traceback:\n%s",
+                _format_traceback(e),
+            )
             return await MockWeatherService().get_alerts()
 
     async def get_full(self) -> dict:
