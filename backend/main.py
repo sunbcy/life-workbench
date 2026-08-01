@@ -14,8 +14,16 @@ from api.weather import router as weather_router
 from api.profile import router as profile_router
 from api.feed import router as feed_router
 from api.location import router as location_router
+from api.interest_map import router as interest_map_router
 from api.data import dashboard_stats, quick_actions
 from services.recommendation import get_engine
+
+# 注册维度分类树 (interests / health / location ...) 到通用框架
+# 这些模块在导入时会调用 register_dimension, 供 /api/interest-map 路由使用
+import services.interest_tree  # noqa: F401
+import services.health_tree    # noqa: F401
+import services.location_tree  # noqa: F401
+import services.knowledge_tree # noqa: F401
 
 
 def load_config():
@@ -48,6 +56,7 @@ app.include_router(weather_router)
 app.include_router(profile_router)
 app.include_router(feed_router)
 app.include_router(location_router)
+app.include_router(interest_map_router)
 
 # 初始化推荐引擎（启动时加载用户画像）
 # 注意：print 内容不要带 emoji，否则在 Windows GBK 终端会抛 UnicodeEncodeError 导致进程退出

@@ -3,9 +3,12 @@ POI 数据源抽象基类与公共分类映射
 
 各 provider（高德 / 百度 / Mock）都归一化为统一的 NearbyResource 结构：
   { id, name, category, icon, distance, address, rating, review_count,
+    avg_price, crowd_level, peak_hour,
     open_status, hours, tags, phone, features, lat, lng, source }
 
 其中 distance 由 API 层基于用户真实坐标用 haversine 重算，provider 统一填 0。
+avg_price(可选, 人均消费) / crowd_level(可选, 1~10 拥挤度) / peak_hour(可选, bool 高峰)
+供推荐引擎的 social / budget 维度做精细化匹配。
 """
 from abc import ABC, abstractmethod
 from typing import Optional

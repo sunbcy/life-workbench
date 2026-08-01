@@ -137,14 +137,61 @@ class Scorer:
         if matched_topic:
             reasons.append(f"与你关注的'{matched_topic}'话题相关")
 
-        # 技能匹配
+        # 层级祖先泛化匹配: 用户标了某叶子节点 (如 Vue),
+        # 内容虽未直接提及该叶子, 但命中其祖先路径词 (如 "前端开发"), 仍给分。
+        # 规则: 精确度 > 泛化度, 故祖先命中分数低于精确 topic 命中,
+        #       且离叶子越近的祖先权重越高 (depth 衰减)。
+        ancestors = uv.get("ancestors", {})
+        if ancestors:
+            best_anc_score = 0.0
+            best_anc_word = ""
+            for leaf, ancestor_words in ancestors.items():
+                # 自身叶词已在 tracking 精确匹配过, 这里跳过
+                if leaf in text or any(leaf in t for t in tags):
+                    continue
+                # ancestor_words = [根 ... 父]; 从最近的父(末尾)向根遍历,
+                # 越靠近叶子的祖先权重越高: 父 0.55 > 祖父 0.45 > ...
+                for depth_from_leaf, idx in enumerate(
+                        range(len(ancestor_words) - 1, -1, -1), start=1):
+                    anc = ancestor_words[idx]
+                    if anc in text or any(anc in t for t in tags):
+                        anc_score = max(0.0, 0.55 - 0.1 * (depth_from_leaf - 1))
+                        if anc_score > best_anc_score:
+                            best_anc_score = anc_score
+                            best_anc_word = anc
+                        break  # 该叶子只取最近命中的祖先
+            if best_anc_word and best_anc_score > max_topic_score:
+                # 仅在未精确命中时作为补充信号
+                if not matched_topic:
+                    reasons.append(f"与你兴趣领域的「{best_anc_word}」方向相关")
+                max_topic_score = max(max_topic_score, best_anc_score)
+
+        # 技能匹配 (权重最高: 擅长 > 想了解)
         skills = uv.get("skills", {})
         skill_score = 0.0
+        matched_skill = ""
         for skill_name, level_score in skills.items():
-            if skill_name in text:
-                skill_score = max(skill_score, level_score)
+            if skill_name in text or any(skill_name in t for t in tags):
+                if level_score > skill_score:
+                    skill_score = level_score
+                    matched_skill = skill_name
         if skill_score > 0.5:
-            reasons.append("与你的技能领域相关")
+            reasons.append(f"与你的擅长领域「{matched_skill}」相关")
+
+        # 弱信号: 知道 / 想了解 / 在学 / 已体验 (权重由低到高, 均低于 skill 与 tracking)
+        weak_bands = (
+            ("know", "知道", "知道"),
+            ("want", "想了解", "想了解"),
+            ("learning", "在学", "正在学习"),
+            ("tried", "已体验", "已体验过"),
+        )
+        weak_score = 0.0
+        for key, label, verb in weak_bands:
+            for kw, w in uv.get(key, {}).items():
+                if kw in text or any(kw in t for t in tags):
+                    if w > weak_score:
+                        weak_score = w
+                        reasons.append(f"你{verb}的「{kw}」相关内容")
 
         # 爱好匹配
         hobbies = uv.get("hobbies", [])
@@ -156,7 +203,7 @@ class Scorer:
         goal_hits = sum(1 for g in goals if g in text)
         goal_score = min(goal_hits / max(len(goals), 1), 1.0) * 0.8
 
-        combined = max(max_topic_score, skill_score, hobby_score, goal_score)
+        combined = max(max_topic_score, skill_score, weak_score, hobby_score, goal_score)
         return combined, reasons
 
     def _location_match(self, uv: dict, iv: dict, item_type: str) -> tuple[float, list[str]]:
@@ -276,58 +323,168 @@ class Scorer:
         if hits > 0:
             return 0.6, ["与你的运动偏好相关"]
 
+        # 层级祖先泛化匹配: 用户标了某健康叶子 (如 高血压),
+        # 内容虽未直接提及该叶子, 但命中其祖先路径词 (如 心血管), 仍给分。
+        ancestors = uv.get("ancestors", {})
+        if ancestors:
+            best_anc_score = 0.0
+            best_anc_word = ""
+            for leaf, ancestor_words in ancestors.items():
+                if leaf in text:
+                    continue
+                for depth_from_leaf, idx in enumerate(
+                        range(len(ancestor_words) - 1, -1, -1), start=1):
+                    anc = ancestor_words[idx]
+                    if anc in text:
+                        anc_score = max(0.0, 0.5 - 0.1 * (depth_from_leaf - 1))
+                        if anc_score > best_anc_score:
+                            best_anc_score = anc_score
+                            best_anc_word = anc
+                        break
+            if best_anc_word:
+                reasons.append(f"与你健康关注的「{best_anc_word}」领域相关")
+                return round(best_anc_score, 3), reasons
+
         return 0.0, []
 
     def _social_match(self, uv: dict, iv: dict, item_type: str) -> tuple[float, list[str]]:
-        """社交偏好匹配"""
+        """社交偏好匹配 (增强版)
+
+        利用画像中的:
+          - introvert_extrovert (0~1 内向/外向)
+          - crowd_tolerance (low/medium/high)
+          - max_crowd_level (1~10 可接受的拥挤上限)
+          - peak_hour_avoidance (是否避开高峰)
+          - preferred_activities (偏好的社交活动类型)
+        与内容项的:
+          - crowd_level (1~10 预估拥挤度, 可选)
+          - peak_hour (是否高峰时段, 可选)
+          - features / tags / text (关键词兜底)
+          - category (周边分类, 如 entertainment/food)
+        做精细化匹配, 不再只靠关键词二分。
+        """
         text = iv.get("text", "")
         tags = iv.get("tags", [])
         features = iv.get("features", [])
+        category = iv.get("category", "")
         all_text = f"{text} {' '.join(tags)} {' '.join(features)}"
         reasons = []
 
-        # 内向/外向影响推荐
         ie = uv.get("introvert_extrovert", 0.5)
         crowd_tol = uv.get("crowd_tolerance", "medium")
+        max_crowd = uv.get("max_crowd_level", 5)
+        peak_avoid = uv.get("peak_avoidance", False)
+        preferred = uv.get("preferred_activities", [])
 
-        # 检查是否是大型活动/热闹场所
-        crowd_keywords = ["聚会", "派对", "音乐节", "夜市", "酒吧", "夜店", "演唱会"]
-        quiet_keywords = ["书店", "图书馆", "咖啡", "茶室", "展览", "画廊", "公园"]
+        # 内容项的拥挤度 / 高峰标记 (由数据源提供, 缺省时回退关键词推断)
+        item_crowd = iv.get("crowd_level")
+        item_peak = iv.get("peak_hour")
 
-        is_crowded = any(kw in all_text for kw in crowd_keywords)
+        crowd_keywords = ["聚会", "派对", "音乐节", "夜市", "酒吧", "夜店", "演唱会", "嘉年华"]
+        quiet_keywords = ["书店", "图书馆", "咖啡", "茶室", "展览", "画廊", "公园", "冥想"]
+        is_crowded = item_peak or any(kw in all_text for kw in crowd_keywords)
         is_quiet = any(kw in all_text for kw in quiet_keywords)
 
-        if ie < 0.4 and is_quiet:  # 内向型 + 安静场所
+        # 1) 偏好社交活动类型命中 → 强信号
+        for act in preferred:
+            if act and act in all_text:
+                reasons.append(f"你喜欢的「{act}」活动")
+                return 0.9, reasons
+
+        # 2) 基于拥挤度数值的精细匹配 (若有结构化字段)
+        if item_crowd is not None:
+            if item_crowd <= max_crowd:
+                base = 0.6
+            else:
+                # 超过可接受上限 → 按超出幅度衰减
+                over = (item_crowd - max_crowd) / max(10 - max_crowd, 1)
+                base = max(0.1, 0.5 - over * 0.4)
+                if base < 0.3:
+                    reasons.append("该地点可能过于拥挤")
+                    return round(base, 3), reasons
+            # 外向型偏好热闹, 内向型偏好安静
+            if ie > 0.6 and is_crowded:
+                base = min(0.9, base + 0.2)
+                reasons.append("热闹的氛围适合你")
+            elif ie < 0.4 and is_quiet:
+                base = min(0.9, base + 0.2)
+                reasons.append("安静的氛围适合你")
+            elif ie < 0.4 and is_crowded:
+                base = max(0.1, base - 0.3)
+                reasons.append("该场所偏喧闹")
+            return round(base, 3), reasons
+
+        # 3) 关键词兜底 (无结构化拥挤度时)
+        if ie < 0.4 and is_quiet:
             reasons.append("安静的氛围适合你")
             return 0.7, reasons
-        elif ie > 0.6 and is_crowded:  # 外向型 + 热闹场所
+        elif ie > 0.6 and is_crowded:
             reasons.append("热闹的氛围适合你")
             return 0.7, reasons
         elif ie < 0.4 and is_crowded:
-            return 0.1, []  # 内向型不推荐喧闹场所
+            return 0.1, []
         elif is_quiet or is_crowded:
             return 0.4, []
 
         return 0.0, []
 
     def _budget_match(self, uv: dict, iv: dict, item_type: str) -> tuple[float, list[str]]:
-        """预算匹配"""
+        """预算匹配 (增强版)
+
+        - product: 价格敏感度品类 + 降价阈值 (原逻辑保留)
+        - nearby:  餐饮/娱乐按画像月预算的价格带给分; 超过用户可承受上限则压分
+        - news:    预算/省钱/理财类话题轻量加分
+        """
         reasons = []
-        if item_type != "product":
+        sensitivity = uv.get("sensitivity", {})
+        monthly = uv.get("monthly_budget", {})
+        threshold = uv.get("price_drop_threshold", 15)
+
+        if item_type == "product":
+            min_price = iv.get("min_price", 0)
+            category = iv.get("category", "")
+            cat_sens = sensitivity.get(category, "medium")
+            if cat_sens == "high" and min_price > 0:
+                return 0.6, ["你对价格敏感，此商品多家比价中"]
+            elif cat_sens == "medium":
+                return 0.3, []
             return 0.0, []
 
-        min_price = iv.get("min_price", 0)
-        sensitivity = uv.get("sensitivity", {})
-        category = iv.get("category", "")
+        if item_type == "nearby":
+            # 优先用结构化人均消费; 否则回退文本中的价格提示
+            avg_price = iv.get("avg_price")
+            if avg_price is None:
+                import re
+                m = re.search(r"人均[约]?(\d+)", iv.get("text", ""))
+                avg_price = int(m.group(1)) if m else None
+            # 只对餐饮/娱乐类用预算约束
+            budget_cat = {
+                "food": monthly.get("dining_out", 0),
+                "entertainment": monthly.get("entertainment", 0),
+            }.get(iv.get("category", ""), 0)
+            if avg_price is None or budget_cat <= 0:
+                return 0.0, []
+            # 单次人均相对月预算的占比阈值: 餐饮<=8% / 娱乐<=15% 视为友好
+            ratio = avg_price / budget_cat
+            if iv.get("category") == "food":
+                if ratio <= 0.08:
+                    return 0.6, [f"人均¥{avg_price}，契合你的餐饮预算"]
+                elif ratio <= 0.15:
+                    return 0.35, []
+                return 0.1, ["超出你的餐饮预算区间"]
+            else:  # entertainment
+                if ratio <= 0.15:
+                    return 0.55, [f"人均¥{avg_price}，契合你的娱乐预算"]
+                elif ratio <= 0.3:
+                    return 0.3, []
+                return 0.1, ["超出你的娱乐预算区间"]
 
-        # 根据品类敏感度判断
-        cat_sens = sensitivity.get(category, "medium")
-        if cat_sens == "high" and min_price > 0:
-            price_drop = uv.get("price_drop_threshold", 15)
-            # 降价趋势商品给高分
-            return 0.6, ["你对价格敏感，此商品多家比价中"]
-        elif cat_sens == "medium":
-            return 0.3, []
+        if item_type == "news":
+            text = iv.get("text", "")
+            budget_kw = ["省钱", "理财", "预算", "优惠", "折扣", "薅羊毛", "消费降级"]
+            if any(kw in text for kw in budget_kw):
+                return 0.4, ["与你关注的预算/省钱话题相关"]
+            return 0.0, []
 
         return 0.0, []
 

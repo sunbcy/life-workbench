@@ -297,6 +297,35 @@ function weightBarClass(weight: number): string {
 
           <!-- 操作按钮 -->
           <div class="flex flex-col items-center gap-1.5 flex-shrink-0">
+            <!-- 支持「世界树下钻」的维度: 额外入口「探索地图」 -->
+            <button
+              v-if="dim.key === 'interests'"
+              @click="$router.push('/interest-map')"
+              class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-gradient-to-r from-emerald-500 to-green-500 text-white hover:from-emerald-600 hover:to-green-600 transition-colors whitespace-nowrap shadow-sm"
+            >
+              🌳 探索兴趣地图
+            </button>
+            <button
+              v-else-if="dim.key === 'health'"
+              @click="$router.push('/interest-map?dim=health')"
+              class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-gradient-to-r from-rose-500 to-pink-500 text-white hover:from-rose-600 hover:to-pink-600 transition-colors whitespace-nowrap shadow-sm"
+            >
+              🩺 探索健康地图
+            </button>
+            <button
+              v-else-if="dim.key === 'location'"
+              @click="$router.push('/interest-map?dim=location')"
+              class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-gradient-to-r from-sky-500 to-blue-500 text-white hover:from-sky-600 hover:to-blue-600 transition-colors whitespace-nowrap shadow-sm"
+            >
+              🗺️ 探索地理地图
+            </button>
+            <button
+              v-else-if="dim.key === 'knowledge'"
+              @click="$router.push('/interest-map?dim=knowledge')"
+              class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:from-violet-600 hover:to-purple-600 transition-colors whitespace-nowrap shadow-sm"
+            >
+              📚 探索知识地图
+            </button>
             <!-- 未激活：显眼的配置按钮 -->
             <button
               v-if="!dim.active"

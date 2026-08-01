@@ -22,6 +22,12 @@ const router = createRouter({
       meta: { title: '我的画像', icon: '🧬' },
     },
     {
+      path: '/interest-map',
+      name: 'interest-map',
+      component: () => import('@/views/InterestMap.vue'),
+      meta: { title: '兴趣地图', icon: '🌳' },
+    },
+    {
       path: '/price',
       name: 'price-compare',
       component: () => import('@/views/PriceCompare.vue'),

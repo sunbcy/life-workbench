@@ -32,3 +32,5 @@ Thumbs.db
 
 # QWeather keys
 ed25519-*.pem
+
+backend/config.yaml

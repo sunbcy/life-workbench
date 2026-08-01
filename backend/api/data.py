@@ -180,7 +180,8 @@ nearby_resources = [
         "open_status": "营业中", "hours": "10:00-22:00",
         "tags": ["购物", "餐饮", "影院", "停车"],
         "phone": "0755-8635-8888",
-        "features": ["免费WiFi", "停车场", "母婴室", "无障碍通道"]
+        "features": ["免费WiFi", "停车场", "母婴室", "无障碍通道"],
+        "avg_price": None, "crowd_level": 8, "peak_hour": True
     },
     {
         "id": 2, "name": "深圳湾公园", "category": "entertainment",
@@ -189,7 +190,8 @@ nearby_resources = [
         "open_status": "开放中", "hours": "06:00-23:00",
         "tags": ["公园", "跑步", "骑行", "观鸟"],
         "phone": None,
-        "features": ["免费开放", "停车场", "自行车道", "观景平台"]
+        "features": ["免费开放", "停车场", "自行车道", "观景平台"],
+        "avg_price": 0, "crowd_level": 6, "peak_hour": True
     },
     {
         "id": 3, "name": "华中科技大学协和深圳医院", "category": "hospital",
@@ -198,7 +200,8 @@ nearby_resources = [
         "open_status": "24小时", "hours": "全天",
         "tags": ["三甲医院", "急诊", "体检"],
         "phone": "0755-2655-3333",
-        "features": ["急诊24h", "在线挂号", "医保定点"]
+        "features": ["急诊24h", "在线挂号", "医保定点"],
+        "avg_price": None, "crowd_level": None, "peak_hour": None
     },
     {
         "id": 4, "name": "招商银行(南山支行)", "category": "bank",
@@ -207,7 +210,8 @@ nearby_resources = [
         "open_status": "营业中", "hours": "09:00-17:00",
         "tags": ["银行", "理财", "外汇"],
         "phone": "0755-2688-6666",
-        "features": ["24hATM", "理财专区", "VIP室"]
+        "features": ["24hATM", "理财专区", "VIP室"],
+        "avg_price": None, "crowd_level": 3, "peak_hour": False
     },
     {
         "id": 5, "name": "深圳图书馆(南山分馆)", "category": "education",
@@ -216,7 +220,8 @@ nearby_resources = [
         "open_status": "开放中", "hours": "09:00-21:00",
         "tags": ["图书馆", "自习", "WiFi", "借阅"],
         "phone": "0755-2654-1234",
-        "features": ["免费WiFi", "自习室", "自助借还", "儿童区"]
+        "features": ["免费WiFi", "自习室", "自助借还", "儿童区"],
+        "avg_price": 0, "crowd_level": 4, "peak_hour": False
     },
     {
         "id": 6, "name": "盒马鲜生(南山店)", "category": "market",
@@ -225,7 +230,8 @@ nearby_resources = [
         "open_status": "营业中", "hours": "09:00-22:00",
         "tags": ["生鲜", "超市", "配送"],
         "phone": "0755-2690-2222",
-        "features": ["30分钟达", "堂食区", "活海鲜", "会员积分"]
+        "features": ["30分钟达", "堂食区", "活海鲜", "会员积分"],
+        "avg_price": 85, "crowd_level": 5, "peak_hour": False
     },
     {
         "id": 7, "name": "海底捞火锅(海岸城店)", "category": "food",
@@ -234,7 +240,8 @@ nearby_resources = [
         "open_status": "营业中", "hours": "11:00-03:00",
         "tags": ["火锅", "聚会", "美甲", "等位茶点"],
         "phone": "0755-8652-7777",
-        "features": ["深夜营业", "包厢", "美甲服务", "免费停车"]
+        "features": ["深夜营业", "包厢", "美甲服务", "免费停车"],
+        "avg_price": 150, "crowd_level": 9, "peak_hour": True
     },
     {
         "id": 8, "name": "地铁2号线-科苑站", "category": "transport",
@@ -243,7 +250,8 @@ nearby_resources = [
         "open_status": "运营中", "hours": "06:30-23:30",
         "tags": ["地铁", "2号线"],
         "phone": None,
-        "features": ["无障碍电梯", "充值网点", "便利店"]
+        "features": ["无障碍电梯", "充值网点", "便利店"],
+        "avg_price": None, "crowd_level": 4, "peak_hour": True
     },
     {
         "id": 9, "name": "超级猩猩健身(科技园店)", "category": "entertainment",
@@ -252,7 +260,8 @@ nearby_resources = [
         "open_status": "营业中", "hours": "06:00-23:00",
         "tags": ["健身", "团课", "按次付费"],
         "phone": "400-893-6666",
-        "features": ["按次付费", "智能门禁", "淋浴", "储物柜"]
+        "features": ["按次付费", "智能门禁", "淋浴", "储物柜"],
+        "avg_price": 69, "crowd_level": 4, "peak_hour": False
     },
     {
         "id": 10, "name": "顺丰快递(科技园营业部)", "category": "service",
@@ -261,7 +270,8 @@ nearby_resources = [
         "open_status": "营业中", "hours": "08:00-20:00",
         "tags": ["快递", "寄件", "收件"],
         "phone": "95338",
-        "features": ["上门取件", "自助寄件柜", "包装服务"]
+        "features": ["上门取件", "自助寄件柜", "包装服务"],
+        "avg_price": None, "crowd_level": 2, "peak_hour": False
     },
     {
         "id": 11, "name": "万象天地", "category": "market",
@@ -270,7 +280,8 @@ nearby_resources = [
         "open_status": "营业中", "hours": "10:00-22:00",
         "tags": ["购物中心", "网红打卡", "美食广场"],
         "phone": "0755-8668-6666",
-        "features": ["停车场", "母婴室", "充电桩", "导购服务"]
+        "features": ["停车场", "母婴室", "充电桩", "导购服务"],
+        "avg_price": None, "crowd_level": 8, "peak_hour": True
     },
     {
         "id": 12, "name": "深圳湾体育中心", "category": "entertainment",
@@ -279,7 +290,8 @@ nearby_resources = [
         "open_status": "营业中", "hours": "06:00-22:00",
         "tags": ["体育", "游泳", "羽毛球", "健身"],
         "phone": "0755-8628-9999",
-        "features": ["游泳馆", "羽毛球馆", "健身房", "停车场"]
+        "features": ["游泳馆", "羽毛球馆", "健身房", "停车场"],
+        "avg_price": 60, "crowd_level": 5, "peak_hour": True
     },
 ]
 

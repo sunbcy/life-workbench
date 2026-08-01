@@ -37,11 +37,35 @@ class UserVectorizer:
         goals = [g.get("topic", "").lower() for g in data.get("learning_goals", [])]
         tracking = {t.get("keyword", "").lower(): t.get("weight", 0.5)
                     for t in data.get("tracking_topics", [])}
+        # 弱信号: 知道 / 想了解 / 在学 / 已体验 (权重低于 tracking, know 最低)
+        know = {k.get("keyword", "").lower(): k.get("weight", 0.3)
+                for k in data.get("know_of", [])}
+        want = {w.get("keyword", "").lower(): w.get("weight", 0.45)
+                for w in data.get("want_to_learn", [])}
+        learning = {g.get("keyword", "").lower(): g.get("weight", 0.6)
+                    for g in data.get("learning", [])}
+        tried = {t.get("keyword", "").lower(): t.get("weight", 0.7)
+                 for t in data.get("tried", [])}
         excluded = set(e.lower() for e in data.get("excluded_topics", []))
+
+        # 层级祖先泛化: 用户标注的兴趣地图节点 -> 其祖先路径词
+        # (标了 Vue, 没标 前端开发 的文章也能通过 "前端" 路径词命中)
+        ancestors = self._interest_ancestors()
         return {
             "skills": skills, "hobbies": hobbies, "goals": goals,
             "tracking": tracking, "excluded": excluded,
+            "know": know, "want": want, "learning": learning, "tried": tried,
+            "ancestors": ancestors,
         }
+
+    @staticmethod
+    def _interest_ancestors() -> dict:
+        """读取兴趣地图标注, 构建 {节点名: [祖先词...]} 映射 (供层级泛化)"""
+        try:
+            from api.interest_map import dimension_ancestors
+            return dimension_ancestors("interests")
+        except Exception:
+            return {}
 
     def _location_vector(self, data: dict) -> dict:
         home = data.get("home", {})
@@ -118,7 +142,18 @@ class UserVectorizer:
             "activity_level": fitness.get("activity_level", "moderate"),
             "concerns": [c.lower() for c in data.get("health_concerns", [])],
             "goals": [g.get("type", "").lower() for g in data.get("health_goals", [])],
+            # 层级祖先泛化: 健康地图标注节点 -> 其祖先路径词
+            "ancestors": self._health_ancestors(),
         }
+
+    @staticmethod
+    def _health_ancestors() -> dict:
+        """读取健康地图标注, 构建 {节点名: [祖先词...]} 映射 (供层级泛化)"""
+        try:
+            from api.interest_map import dimension_ancestors
+            return dimension_ancestors("health")
+        except Exception:
+            return {}
 
     def _social_vector(self, data: dict) -> dict:
         personality = data.get("personality", {})
@@ -139,6 +174,7 @@ class UserVectorizer:
         alerts = data.get("alert_thresholds", {})
         return {
             "monthly_total": sum(v for v in monthly.values() if isinstance(v, (int, float))),
+            "monthly_budget": monthly,
             "sensitivity": sensitivity,
             "price_drop_threshold": alerts.get("price_drop_pct", 15),
         }
@@ -196,4 +232,7 @@ class ItemVectorizer:
             "distance_km": item.get("distance", 5.0),
             "rating": item.get("rating", 0),
             "review_count": item.get("review_count", 0),
+            "avg_price": item.get("avg_price"),
+            "crowd_level": item.get("crowd_level"),
+            "peak_hour": item.get("peak_hour"),
         }
