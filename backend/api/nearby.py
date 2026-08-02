@@ -28,9 +28,12 @@ async def get_resources(
         category=category, keyword=keyword, sort=sort, radius=radius
     )
     resources = result["resources"]
+    resource_crs = result.get("resource_crs", "wgs84")
 
     # 用用户真实位置重算距离，并按真实距离过滤 / 排序
-    geolocation.apply_real_distance(resources)
+    # resource_crs 标记资源坐标坐标系(高德=gcj02/百度=bd09/mock=wgs84)，
+    # 据此把用户 WGS-84 坐标对齐后再算距，消除跨坐标系偏移。
+    geolocation.apply_real_distance(resources, resource_crs=resource_crs)
     resources = [r for r in resources if r["distance"] <= radius]
     if sort == "distance":
         resources.sort(key=lambda r: r["distance"])

@@ -1,11 +1,21 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { useLocation } from '@/composables/useLocation'
 import type { CurrentWeather, ForecastDay, WeatherAlert } from '@/types'
 
-const { data: weather, loading } = useApi<CurrentWeather>('/weather/current')
-const { data: forecast } = useApi<ForecastDay[]>('/weather/forecast')
-const { data: alerts } = useApi<WeatherAlert[]>('/weather/alerts')
+const { data: weather, loading, refetch: refetchWeather } = useApi<CurrentWeather>('/weather/current')
+const { data: forecast, refetch: refetchForecast } = useApi<ForecastDay[]>('/weather/forecast')
+const { data: alerts, refetch: refetchAlerts } = useApi<WeatherAlert[]>('/weather/alerts')
+
+// 实时定位：设备/网络/IP 上报后，天气应随之刷新
+const { label: locationLabel, city, district, updatedAt } = useLocation()
+
+watch(updatedAt, () => {
+  refetchWeather()
+  refetchForecast()
+  refetchAlerts()
+})
 
 function weatherIcon(icon: string): string {
   const map: Record<string, string> = {
@@ -27,7 +37,9 @@ function weatherIcon(icon: string): string {
       <h3 class="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
         <span>🌤️</span> 天气
       </h3>
-      <span class="text-[10px] text-gray-400 dark:text-gray-500">深圳市·南山区</span>
+      <span class="text-[10px] text-gray-400 dark:text-gray-500">
+        {{ city ? (district ? `${city}·${district}` : city) : locationLabel }}
+      </span>
     </div>
 
     <!-- 加载状态 -->

@@ -24,6 +24,116 @@ async function onReload() {
   }
 }
 
+// ========== 快捷画像编辑 (interests 顶层字段) ==========
+const quickOpen = ref(false)
+const quickLoading = ref(false)
+const quickSaving = ref(false)
+const quickError = ref<string | null>(null)
+const quickMsg = ref('')
+
+// 表单数据 (本地副本, 保存时提交)
+const form = ref({
+  learning_goals: [] as { topic: string; priority: 'high' | 'medium' | 'low' }[],
+  tracking_topics: [] as { keyword: string; weight: number }[],
+  excluded_topics: [] as string[],
+  hobbies: [] as { name: string; frequency: 'daily' | 'weekly' | 'monthly' | 'occasionally'; category: string }[],
+})
+
+// 临时输入行 (用于往列表里加新项)
+const newGoal = ref({ topic: '', priority: 'medium' as const })
+const newTopic = ref({ keyword: '', weight: 0.8 })
+const newExclude = ref('')
+const newHobby = ref({ name: '', frequency: 'weekly' as const, category: '' })
+
+async function openQuickEditor() {
+  quickOpen.value = true
+  quickLoading.value = true
+  quickError.value = null
+  quickMsg.value = ''
+  try {
+    const r = await fetch('/api/profile/interests')
+    const d = await r.json()
+    if (d.code === 0) {
+      const src = d.data
+      form.value = {
+        learning_goals: (src.learning_goals || []).map((g: any) => ({ topic: g.topic || '', priority: g.priority || 'medium' })),
+        tracking_topics: (src.tracking_topics || []).map((t: any) => ({ keyword: t.keyword || '', weight: t.weight ?? 0.8 })),
+        excluded_topics: (src.excluded_topics || []).map((e: any) => (typeof e === 'string' ? e : '')).filter(Boolean),
+        hobbies: (src.hobbies || []).map((h: any) => ({ name: h.name || '', frequency: h.frequency || 'weekly', category: h.category || '' })),
+      }
+    } else {
+      quickError.value = d.detail || d.message || '加载失败'
+    }
+  } catch (e: any) {
+    quickError.value = e.message || '网络错误'
+  } finally {
+    quickLoading.value = false
+  }
+}
+
+function closeQuickEditor() {
+  quickOpen.value = false
+  quickError.value = null
+  quickMsg.value = ''
+}
+
+// 列表项增删
+function addGoal() {
+  if (!newGoal.value.topic.trim()) return
+  form.value.learning_goals.push({ topic: newGoal.value.topic.trim(), priority: newGoal.value.priority })
+  newGoal.value = { topic: '', priority: 'medium' }
+}
+function addTopic() {
+  if (!newTopic.value.keyword.trim()) return
+  form.value.tracking_topics.push({ keyword: newTopic.value.keyword.trim(), weight: newTopic.value.weight })
+  newTopic.value = { keyword: '', weight: 0.8 }
+}
+function addExclude() {
+  const v = newExclude.value.trim()
+  if (!v || form.value.excluded_topics.includes(v)) return
+  form.value.excluded_topics.push(v)
+  newExclude.value = ''
+}
+function addHobby() {
+  if (!newHobby.value.name.trim()) return
+  form.value.hobbies.push({ name: newHobby.value.name.trim(), frequency: newHobby.value.frequency, category: newHobby.value.category.trim() })
+  newHobby.value = { name: '', frequency: 'weekly', category: '' }
+}
+function removeGoal(i: number) { form.value.learning_goals.splice(i, 1) }
+function removeTopic(i: number) { form.value.tracking_topics.splice(i, 1) }
+function removeExclude(i: number) { form.value.excluded_topics.splice(i, 1) }
+function removeHobby(i: number) { form.value.hobbies.splice(i, 1) }
+
+async function saveQuick() {
+  quickSaving.value = true
+  quickError.value = null
+  quickMsg.value = ''
+  try {
+    const r = await fetch('/api/profile/interests/fields', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        learning_goals: form.value.learning_goals,
+        tracking_topics: form.value.tracking_topics,
+        excluded_topics: form.value.excluded_topics,
+        hobbies: form.value.hobbies,
+      }),
+    })
+    const d = await r.json()
+    if (d.code === 0) {
+      quickMsg.value = '✅ 已保存并热重载'
+      await reloadProfile()
+      setTimeout(closeQuickEditor, 1500)
+    } else {
+      quickError.value = d.detail || d.message || '保存失败'
+    }
+  } catch (e: any) {
+    quickError.value = e.message || '网络错误'
+  } finally {
+    quickSaving.value = false
+  }
+}
+
 // ========== YAML 编辑器 ==========
 const editingDim = ref<string | null>(null)
 const editingName = ref('')
@@ -306,6 +416,13 @@ function weightBarClass(weight: number): string {
               🌳 探索兴趣地图
             </button>
             <button
+              v-if="dim.key === 'interests'"
+              @click="openQuickEditor"
+              class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 transition-colors whitespace-nowrap shadow-sm"
+            >
+              ⚡ 快捷表单
+            </button>
+            <button
               v-else-if="dim.key === 'health'"
               @click="$router.push('/interest-map?dim=health')"
               class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-gradient-to-r from-rose-500 to-pink-500 text-white hover:from-rose-600 hover:to-pink-600 transition-colors whitespace-nowrap shadow-sm"
@@ -439,6 +556,244 @@ function weightBarClass(weight: number): string {
                   {{ saving ? '⏳ 保存中...' : '💾 保存并重载' }}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- ========== 快捷画像编辑抽屉 ========== -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div
+          v-if="quickOpen"
+          class="fixed inset-0 z-50 flex items-stretch justify-end"
+          @click.self="closeQuickEditor"
+        >
+          <div class="absolute inset-0 bg-black/40 backdrop-blur-sm cursor-pointer" @click="closeQuickEditor"></div>
+
+          <div class="relative w-full max-w-lg h-full card rounded-none sm:rounded-l-2xl flex flex-col animate-slide-in-right bg-white dark:bg-gray-900">
+            <!-- 标题栏 -->
+            <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex-shrink-0">
+              <div class="flex items-center gap-2">
+                <span class="text-lg">⚡</span>
+                <h3 class="text-sm font-bold text-gray-900 dark:text-white">interests 维度 · 快捷表单</h3>
+                <span class="text-[10px] text-gray-400">核心意图 (与🌳树标注互补)</span>
+              </div>
+              <button
+                @click="closeQuickEditor"
+                class="w-8 h-8 flex items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <!-- 内容区 -->
+            <div class="flex-1 overflow-y-auto p-5 space-y-6">
+              <div v-if="quickLoading" class="space-y-3">
+                <div v-for="i in 4" :key="i" class="h-16 bg-gray-100 dark:bg-gray-700 rounded-xl animate-pulse"></div>
+              </div>
+
+              <template v-else>
+                <!-- 学习目标 -->
+                <section>
+                  <h4 class="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-1">
+                    📖 学习目标 <span class="text-[9px] font-normal text-gray-400">(影响教育/课程推荐)</span>
+                  </h4>
+                  <div class="space-y-2">
+                    <div
+                      v-for="(g, i) in form.learning_goals"
+                      :key="`g${i}`"
+                      class="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-xl p-2"
+                    >
+                      <input
+                        v-model="g.topic"
+                        class="flex-1 min-w-0 text-xs bg-transparent text-gray-900 dark:text-gray-100 focus:outline-none"
+                        placeholder="学习目标主题"
+                      />
+                      <select
+                        v-model="g.priority"
+                        class="text-[10px] rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-1.5 py-1"
+                      >
+                        <option value="high">高</option>
+                        <option value="medium">中</option>
+                        <option value="low">低</option>
+                      </select>
+                      <button @click="removeGoal(i)" class="w-6 h-6 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors flex-shrink-0">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                      </button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <input
+                        v-model="newGoal.topic"
+                        @keyup.enter="addGoal"
+                        class="flex-1 min-w-0 text-xs rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                        placeholder="新增学习目标..."
+                      />
+                      <select
+                        v-model="newGoal.priority"
+                        class="text-[10px] rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-1.5 py-1.5"
+                      >
+                        <option value="high">高</option>
+                        <option value="medium">中</option>
+                        <option value="low">低</option>
+                      </select>
+                      <button @click="addGoal" class="w-7 h-7 flex items-center justify-center rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors flex-shrink-0 text-sm">+</button>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- 长期关注话题 -->
+                <section>
+                  <h4 class="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-1">
+                    🔍 长期关注话题 <span class="text-[9px] font-normal text-gray-400">(持续匹配相关资讯)</span>
+                  </h4>
+                  <div class="space-y-2">
+                    <div
+                      v-for="(t, i) in form.tracking_topics"
+                      :key="`t${i}`"
+                      class="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-xl p-2"
+                    >
+                      <input
+                        v-model="t.keyword"
+                        class="flex-1 min-w-0 text-xs bg-transparent text-gray-900 dark:text-gray-100 focus:outline-none"
+                        placeholder="关注关键词"
+                      />
+                      <div class="flex items-center gap-1 flex-shrink-0">
+                        <input
+                          type="range" min="0.1" max="1" step="0.05"
+                          v-model.number="t.weight"
+                          class="w-16 accent-primary-500"
+                        />
+                        <span class="text-[9px] text-gray-500 w-7 text-right">{{ t.weight.toFixed(2) }}</span>
+                      </div>
+                      <button @click="removeTopic(i)" class="w-6 h-6 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors flex-shrink-0">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                      </button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <input
+                        v-model="newTopic.keyword"
+                        @keyup.enter="addTopic"
+                        class="flex-1 min-w-0 text-xs rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                        placeholder="新增关注话题..."
+                      />
+                      <div class="flex items-center gap-1 flex-shrink-0">
+                        <input type="range" min="0.1" max="1" step="0.05" v-model.number="newTopic.weight" class="w-16 accent-primary-500" />
+                      </div>
+                      <button @click="addTopic" class="w-7 h-7 flex items-center justify-center rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors flex-shrink-0 text-sm">+</button>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- 排除话题 -->
+                <section>
+                  <h4 class="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-1">
+                    🚫 排除话题 <span class="text-[9px] font-normal text-gray-400">(自动过滤)</span>
+                  </h4>
+                  <div class="flex flex-wrap gap-1.5 mb-2">
+                    <span
+                      v-for="(e, i) in form.excluded_topics"
+                      :key="`e${i}`"
+                      class="text-[10px] px-2 py-1 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/20 flex items-center gap-1"
+                    >
+                      {{ e }}
+                      <button @click="removeExclude(i)" class="hover:text-red-700">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                      </button>
+                    </span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <input
+                      v-model="newExclude"
+                      @keyup.enter="addExclude"
+                      class="flex-1 min-w-0 text-xs rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                      placeholder="新增屏蔽话题..."
+                    />
+                    <button @click="addExclude" class="w-7 h-7 flex items-center justify-center rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors flex-shrink-0 text-sm">+</button>
+                  </div>
+                </section>
+
+                <!-- 爱好 -->
+                <section>
+                  <h4 class="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-1">
+                    🎨 爱好 <span class="text-[9px] font-normal text-gray-400">(影响生活/娱乐推荐)</span>
+                  </h4>
+                  <div class="space-y-2">
+                    <div
+                      v-for="(h, i) in form.hobbies"
+                      :key="`h${i}`"
+                      class="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-xl p-2"
+                    >
+                      <input
+                        v-model="h.name"
+                        class="flex-1 min-w-0 text-xs bg-transparent text-gray-900 dark:text-gray-100 focus:outline-none"
+                        placeholder="爱好名称"
+                      />
+                      <select
+                        v-model="h.frequency"
+                        class="text-[10px] rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-1.5 py-1"
+                      >
+                        <option value="daily">每天</option>
+                        <option value="weekly">每周</option>
+                        <option value="monthly">每月</option>
+                        <option value="occasionally">偶尔</option>
+                      </select>
+                      <button @click="removeHobby(i)" class="w-6 h-6 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors flex-shrink-0">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                      </button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <input
+                        v-model="newHobby.name"
+                        class="flex-1 min-w-0 text-xs rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                        placeholder="新增爱好..."
+                      />
+                      <select
+                        v-model="newHobby.frequency"
+                        class="text-[10px] rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-1.5 py-1.5"
+                      >
+                        <option value="daily">每天</option>
+                        <option value="weekly">每周</option>
+                        <option value="monthly">每月</option>
+                        <option value="occasionally">偶尔</option>
+                      </select>
+                      <button @click="addHobby" class="w-7 h-7 flex items-center justify-center rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors flex-shrink-0 text-sm">+</button>
+                    </div>
+                  </div>
+                </section>
+              </template>
+
+              <!-- 提示 -->
+              <div v-if="quickError" class="p-3 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20">
+                <p class="text-xs text-red-600 dark:text-red-400">{{ quickError }}</p>
+              </div>
+              <div v-if="quickMsg" class="p-3 rounded-xl bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20">
+                <p class="text-xs text-green-600 dark:text-green-400">{{ quickMsg }}</p>
+              </div>
+              <p class="text-[10px] text-gray-400 leading-relaxed">
+                💡 此类表单项与「探索兴趣地图」的树标注互补：树负责细颗粒度打标，表单负责维护核心意图。
+                保存时自动保留树派生的 <code class="text-primary-600 dark:text-primary-400">_derived</code> 项。
+              </p>
+            </div>
+
+            <!-- 底部按钮 -->
+            <div class="flex items-center justify-between px-5 py-4 border-t border-gray-100 dark:border-gray-700 flex-shrink-0">
+              <button
+                @click="closeQuickEditor"
+                class="px-4 py-2.5 text-xs font-medium rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                @click="saveQuick"
+                :disabled="quickSaving || quickLoading"
+                class="px-5 py-2.5 text-xs font-medium rounded-xl bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-60 transition-colors shadow-sm"
+              >
+                {{ quickSaving ? '⏳ 保存中...' : '💾 保存并热重载' }}
+              </button>
             </div>
           </div>
         </div>

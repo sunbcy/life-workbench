@@ -72,3 +72,7 @@ def create_nearby_service():
     config = get_config()
     from .nearby_service import NearbyService
     return NearbyService(config)
+
+
+# 实时定位服务（天气/周边共享的当前位置，由前端设备定位上报覆盖）
+from . import geolocation  # noqa: E402

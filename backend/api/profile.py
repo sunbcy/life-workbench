@@ -252,6 +252,14 @@ class RawProfileUpdate(BaseModel):
     content: str
 
 
+# ========== 快捷画像编辑: 直接更新 interests.yaml 顶层字段 ==========
+class InterestsFieldsUpdate(BaseModel):
+    learning_goals: list | None = None
+    tracking_topics: list | None = None
+    excluded_topics: list | None = None
+    hobbies: list | None = None
+
+
 @router.get("/summary")
 async def get_profile_summary():
     """获取用户画像摘要（脱敏，不暴露原始数据）"""
@@ -279,6 +287,49 @@ async def reload_profile():
 
 
 # ========== 读写原始 YAML 文件 ==========
+
+@router.get("/interests")
+async def get_interests_fields():
+    """读取 interests.yaml 的顶层意图字段(结构化, 供快捷编辑表单回填)。
+
+    自动过滤树派生 (_derived) 项, 仅返回用户手填项。
+    """
+    file_path = PROFILE_DIR / "interests.yaml"
+
+    if not file_path.exists():
+        return {
+            "code": 0,
+            "data": {
+                "learning_goals": [],
+                "tracking_topics": [],
+                "excluded_topics": [],
+                "hobbies": [],
+                "is_new": True,
+            },
+        }
+
+    try:
+        data = yaml.safe_load(file_path.read_text(encoding="utf-8")) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取失败: {e}")
+
+    def _user_items(items):
+        """保留非派生的手写项"""
+        if not isinstance(items, list):
+            return []
+        return [i for i in items if not (isinstance(i, dict) and i.get("_derived"))]
+
+    return {
+        "code": 0,
+        "data": {
+            "learning_goals": _user_items(data.get("learning_goals", [])),
+            "tracking_topics": _user_items(data.get("tracking_topics", [])),
+            "excluded_topics": [e for e in data.get("excluded_topics", []) if isinstance(e, str)],
+            "hobbies": _user_items(data.get("hobbies", [])),
+            "is_new": False,
+        },
+    }
+
 
 @router.get("/raw/{dimension}")
 async def get_raw_profile(dimension: str):
@@ -332,6 +383,75 @@ async def update_raw_profile(dimension: str, body: RawProfileUpdate):
 
 
 # ========== 一键初始化 ==========
+
+@router.put("/interests/fields")
+async def update_interests_fields(body: InterestsFieldsUpdate):
+    """快捷画像编辑: 直接更新 interests.yaml 的顶层意图字段并热重载。
+
+    仅覆盖传入的字段, 保留 skills / 树派生结果 / 其它字段不变。
+    列表字段会整体替换(方便表单维护)。
+    """
+    import copy
+
+    file_path = PROFILE_DIR / "interests.yaml"
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 读取现有数据 (不存在则基于模板解析)
+    if file_path.exists():
+        try:
+            data = yaml.safe_load(file_path.read_text(encoding="utf-8")) or {}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"读取失败: {e}")
+    else:
+        data = yaml.safe_load(DIMENSION_TEMPLATES["interests"]) or {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    field_map = {
+        "learning_goals": body.learning_goals,
+        "tracking_topics": body.tracking_topics,
+        "excluded_topics": body.excluded_topics,
+        "hobbies": body.hobbies,
+    }
+
+    updated = []
+    for key, value in field_map.items():
+        if value is None:
+            continue
+        # 对 list[dict] 字段: 保留树派生 (_derived) 项 + 用户手填表单项
+        # 对 list[str]  字段: 直接整体替换 (excluded_topics 无派生项)
+        existing = data.get(key, [])
+        merged = list(value)
+        if (
+            isinstance(existing, list)
+            and existing
+            and isinstance(existing[0], dict)
+            and isinstance(value, list)
+            and (value and isinstance(value[0], dict))
+        ):
+            derived = [e for e in existing if isinstance(e, dict) and e.get("_derived")]
+            merged = derived + list(value)
+        data[key] = copy.deepcopy(merged)
+        updated.append(key)
+
+    # 写回 (保持顺序: 用现有内容追加未出现的键)
+    try:
+        file_path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入失败: {e}")
+
+    reload_engine()
+    engine = get_engine()
+
+    return {
+        "code": 0,
+        "message": f"已更新字段: {', '.join(updated) or '无'}",
+        "data": engine.profile_summary,
+    }
+
+
+
 
 @router.post("/init-all")
 async def init_all_dimensions():

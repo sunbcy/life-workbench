@@ -25,6 +25,17 @@ class NearbyService:
     async def get_categories(self) -> list[dict]:
         return await self.provider.get_categories()
 
+    def _crs_of(self, provider) -> str:
+        """给定 provider 实例返回其坐标系（用于与用户 WGS-84 坐标对齐距离计算）"""
+        from .poi.amap_provider import AmapPOIProvider
+        from .poi.baidu_provider import BaiduPOIProvider
+
+        if isinstance(provider, AmapPOIProvider):
+            return "gcj02"
+        if isinstance(provider, BaiduPOIProvider):
+            return "bd09"
+        return "wgs84"
+
     async def get_resources(
         self, category: str = "all", keyword: str = "",
         sort: str = "distance", radius: float = 5.0
@@ -40,17 +51,24 @@ class NearbyService:
         now = time.time()
         hit = self._cache.get(cache_key)
         if hit and now - hit[1] < self._cache_ttl:
-            resources = hit[0]
+            resources, used_crs = hit[0], hit[2]
         else:
+            used_provider = self.provider
             resources = await self._fetch(self.provider, lat, lng, radius_m, category, keyword)
-            # 真实数据源失败/无数据 -> 自动回退 Mock
+            # 真实数据源失败/无数据 -> 自动回退 Mock（坐标系随之变为 wgs84）
             if not resources and not isinstance(self.provider, MockPOIProvider):
+                used_provider = MockPOIProvider(self.config)
                 resources = await self._fetch(
-                    MockPOIProvider(self.config), lat, lng, radius_m, category, keyword
+                    used_provider, lat, lng, radius_m, category, keyword
                 )
-            self._cache[cache_key] = (resources, now)
+            used_crs = self._crs_of(used_provider)
+            self._cache[cache_key] = (resources, now, used_crs)
 
-        return {"resources": resources, "total": len(resources)}
+        return {
+            "resources": resources,
+            "total": len(resources),
+            "resource_crs": used_crs,
+        }
 
     async def _fetch(self, provider, lat, lng, radius_m, category, keyword) -> list[dict]:
         try:

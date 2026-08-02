@@ -69,6 +69,30 @@ export interface ProfileSummary {
   activated_count: number
 }
 
+// ========== 快捷画像编辑 (interests 顶层字段) ==========
+export interface LearningGoal {
+  topic: string
+  priority: 'high' | 'medium' | 'low'
+}
+
+export interface TrackingTopic {
+  keyword: string
+  weight: number
+}
+
+export interface Hobby {
+  name: string
+  frequency: 'daily' | 'weekly' | 'monthly' | 'occasionally'
+  category: string
+}
+
+export interface InterestsFields {
+  learning_goals: LearningGoal[]
+  tracking_topics: TrackingTopic[]
+  excluded_topics: string[]
+  hobbies: Hobby[]
+}
+
 // ========== 天气类型 ==========
 export interface CurrentWeather {
   temperature: number

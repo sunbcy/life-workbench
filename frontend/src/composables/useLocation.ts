@@ -9,6 +9,7 @@ const city = ref('')
 const district = ref('')
 const source = ref<'device' | 'ip' | 'config' | 'unknown'>('unknown')
 const status = ref<'idle' | 'locating' | 'done' | 'error'>('idle')
+const refreshing = ref(false)
 const error = ref<string | null>(null)
 const updatedAt = ref<string | null>(null)
 let initialized = false
@@ -64,7 +65,11 @@ function applyBackendDefault(): Promise<void> {
       city.value = d.city || ''
       district.value = d.district || ''
       source.value = (d.source as any) || 'config'
-      updatedAt.value = d.updated_at || null
+      // 拿到可用位置即标记 updatedAt：用已知（配置/旧）位置先秒出，
+      // 后续定位刷新成功会再次更新此时间戳触发周边重算。
+      if (lat.value != null && lng.value != null) {
+        updatedAt.value = new Date().toISOString()
+      }
     })
 }
 
@@ -73,6 +78,7 @@ function locate(force = false): Promise<void> {
   initialized = true
   status.value = 'locating'
   error.value = null
+  refreshing.value = true
 
   const tryDevice = (): Promise<void> =>
     new Promise<void>((resolve, reject) => {
@@ -106,11 +112,19 @@ function locate(force = false): Promise<void> {
     .catch(() => applyBackendDefault())
     .then(() => {
       status.value = 'done'
+      // 成功拿到新位置/坐标才更新时间戳 → 触发周边等依赖重算
+      if (lat.value != null && lng.value != null) {
+        updatedAt.value = new Date().toISOString()
+      }
       pushToBackend()
     })
     .catch((e: any) => {
+      // 定位失败：保留原有位置（不更新 updatedAt），周边继续用旧坐标
       status.value = 'error'
       error.value = e?.message || '定位失败'
+    })
+    .finally(() => {
+      refreshing.value = false
     })
 }
 
@@ -139,5 +153,5 @@ export function useLocation() {
       }[source.value] || '位置未知')
   )
 
-  return { lat, lng, city, district, source, status, error, updatedAt, label, sourceLabel, locate, init }
+  return { lat, lng, city, district, source, status, refreshing, error, updatedAt, label, sourceLabel, locate, init }
 }

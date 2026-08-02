@@ -7,12 +7,9 @@ import type { NearbyResource, NearbyCategory } from '@/types'
 
 const { list: categories } = useApiList<NearbyCategory>('/nearby/categories')
 const { list: resources, total, loading, fetch } = useApiList<NearbyResource>('/nearby/resources')
-const { updatedAt } = useLocation()
+const { updatedAt, refreshing, label: locationLabel, sourceLabel, locate } = useLocation()
 
-// 定位更新后，基于真实坐标重新拉取周边（距离/排序会随之变化）
-watch(updatedAt, () => fetchData())
-
-// 筛选状态
+// 筛选状态（必须在 watch/函数之前声明，避免 TDZ 访问未初始化变量）
 const activeCategory = ref('all')
 const sortBy = ref('distance')
 const keyword = ref('')
@@ -21,6 +18,19 @@ const radius = ref(5)
 // 详情弹窗
 const showDetail = ref(false)
 const selectedResource = ref<NearbyResource | null>(null)
+
+// 有可用位置（配置/旧坐标）即先用它秒出；之后定位刷新到新坐标时 updatedAt 变化再重拉。
+// updatedAt 为 null 表示尚未取得任何位置，不拉取（避免空坐标请求）。
+watch(updatedAt, (ts) => {
+  if (ts) fetchData()
+}, { immediate: true })
+
+// 刷新位置：点击后强制重新定位；定位进行中显示 loading；
+// 只有真正拿到新位置/坐标才会更新 updatedAt 并触发下方重拉，期间继续用旧坐标。
+function refreshLocation() {
+  if (refreshing.value) return
+  locate(true)
+}
 
 function onCategoryChange(catId: string) {
   activeCategory.value = catId
@@ -87,6 +97,31 @@ const dataSourceLabel = computed(() => {
       <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
         发现身边的好去处，美食、购物、医疗、交通一应俱全
       </p>
+    </div>
+
+    <!-- 定位状态条 + 刷新位置 -->
+    <div class="flex items-center justify-between gap-3 mb-4">
+      <div class="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400 min-w-0">
+        <span class="truncate">{{ locationLabel }}</span>
+        <span class="px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 whitespace-nowrap">
+          {{ sourceLabel }}
+        </span>
+      </div>
+      <button
+        @click="refreshLocation"
+        :disabled="refreshing"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors whitespace-nowrap disabled:opacity-60"
+        title="重新定位后将以新坐标刷新周边"
+      >
+        <svg
+          class="w-3.5 h-3.5"
+          :class="refreshing ? 'animate-spin' : ''"
+          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        {{ refreshing ? '定位中…' : '刷新位置' }}
+      </button>
     </div>
 
     <!-- 搜索和筛选栏 -->

@@ -23,6 +23,16 @@ class MockWeatherService:
     def __init__(self, config: dict | None = None):
         self.config = config or {}
 
+    def set_location(self, lat: float, lng: float) -> None:
+        """接收实时经纬度（mock 模式下不实际查询，仅记录）"""
+        self._lat = lat
+        self._lng = lng
+
+    def set_place_name(self, city: str | None, district: str | None = None) -> None:
+        """接收实时地名（mock 模式下不实际查询，仅记录）"""
+        self._city = city
+        self._district = district
+
     async def get_current(self) -> dict:
         from api.data import weather_data
         return weather_data["current"]
@@ -135,6 +145,12 @@ class QWeatherService:
         self.config = config or {}
         self.api_key = self.config.get("api_key", "")
         self.location_id = self.config.get("location_id", "101280604")
+        # 实时经纬度：由前端设备/网络定位上报后写入，覆盖固定 location_id
+        self._lat: float | None = None
+        self._lng: float | None = None
+        self._city: str | None = None
+        self._district: str | None = None
+
 
         # JWT 配置
         self._use_jwt = False
@@ -164,6 +180,23 @@ class QWeatherService:
                     "QWeather JWT 配置不完整，缺少: %s。回退到 API Key 或 mock",
                     ", ".join(missing),
                 )
+
+    def set_location(self, lat: float, lng: float) -> None:
+        """写入实时经纬度（来自设备/网络定位），优先于配置中的固定 location_id"""
+        self._lat = float(lat)
+        self._lng = float(lng)
+
+    def set_place_name(self, city: str | None, district: str | None = None) -> None:
+        """写入实时地名（用于日志/展示，不影响查询参数）"""
+        self._city = city
+        self._district = district
+
+    @property
+    def _location_param(self) -> str:
+        """和风天气 location 参数：优先使用实时经纬度 (lat,lng)，否则回退配置 location_id"""
+        if self._lat is not None and self._lng is not None:
+            return f"{self._lat:.4f},{self._lng:.4f}"
+        return self.location_id
 
     @property
     def _base_url(self) -> str:
@@ -205,7 +238,8 @@ class QWeatherService:
 
         url = f"{self._base_url}/{endpoint}"
         headers = {}
-        params = {"location": self.location_id}
+        location_param = self._location_param
+        params = {"location": location_param}
 
         if self._use_jwt:
             token = self._get_jwt()
@@ -220,7 +254,7 @@ class QWeatherService:
         req_summary = (
             f"GET {url}\n"
             f"  Auth: {auth_method}\n"
-            f"  Params: location={self.location_id}"
+            f"  Params: location={location_param}"
             + (f", key={self.api_key[:8]}..." if not self._use_jwt and self.api_key else "")
             + f"\n  Host header target: {url.split('/')[2]}"
         )
