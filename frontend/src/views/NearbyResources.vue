@@ -13,7 +13,7 @@ const { updatedAt, refreshing, label: locationLabel, sourceLabel, locate } = use
 const activeCategory = ref('all')
 const sortBy = ref('distance')
 const keyword = ref('')
-const radius = ref(5)
+const radius = ref(3)
 
 // 详情弹窗
 const showDetail = ref(false)

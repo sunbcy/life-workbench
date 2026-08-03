@@ -74,7 +74,7 @@ datasource:
   # 未配置对应 API Key 时自动回退到 mock，保证页面可用
   nearby:
     provider: "amap"
-    amap_key: "133629ce8a986cbf8820c0aa5dae02c8"                 # 高德 Web 服务 Key (https://lbs.amap.com/)
+    amap_key: "f11621947c541f3102d0ff5d090b3490"                 # 高德 Web 服务 Key (https://lbs.amap.com/)
     baidu_key: ""                # 百度地图 AK (https://lbsyun.baidu.com/)
 
   # 地图 API 密钥（也可直接写在 nearby 下，二选一）
@@ -82,3 +82,11 @@ datasource:
   #   api_key: "你的高德Key"
   # baidu:
   #   api_key: "你的百度AK"
+
+# AI 职业导师 — 基于兴趣/技能树打标生成职业规划报告
+# provider: 兼容 OpenAI 的任意服务 (OpenAI / DeepSeek / 通义 / 智谱 / 本地 ollama ...)
+# 不填 api_key 时自动降级为本地启发式总结 (功能可用, 只是不够深)
+ai:
+  base_url: "https://api.deepseek.com/v1"  # "https://api.openai.com/v1"   # 可改为 DeepSeek: https://api.deepseek.com/v1 等
+  api_key: "sk-97ed08d31f2b48e48d349d5d4f4d461c"                              # 填入你的密钥以启用 LLM 深度分析
+  model: "deepseek-v4-pro"                     # 按服务商支持的模型名填写

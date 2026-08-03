@@ -40,6 +40,25 @@ function ipLocate(): Promise<{ lat: number; lng: number; city: string; district:
     }))
 }
 
+function backendDetect(): Promise<{ lat: number; lng: number; city: string; district: string; source: string }> {
+  // 调用后端 /api/location/detect 进行 Android/Termux 原生定位
+  return fetch(`${BASE}/location/detect`, { method: 'POST' })
+    .then((r) => r.json())
+    .then((json: any) => {
+      if (json.code === 0 && json.data) {
+        const d = json.data
+        return {
+          lat: Number(d.lat),
+          lng: Number(d.lng),
+          city: d.city || '',
+          district: d.district || '',
+          source: d.source || 'backend',
+        }
+      }
+      throw new Error(json.message || '后端定位失败')
+    })
+}
+
 function pushToBackend() {
   if (lat.value == null || lng.value == null) return
   fetch(`${BASE}/location`, {
@@ -101,23 +120,55 @@ function locate(force = false): Promise<void> {
       )
     })
 
+  // 调后端用坐标匹配纠正地名（前端 Nominatim 逆地理可能不准）
+  // 轻量接口，不走完整定位流水线
+  const correctDistrict = (): Promise<void> => {
+    if (lat.value == null || lng.value == null) return Promise.resolve()
+    return fetch(`${BASE}/location/reverse-geocode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat: lat.value, lng: lng.value }),
+    })
+      .then((r) => r.json())
+      .then((json: any) => {
+        if (json.code === 0 && json.data?.city) {
+          city.value = json.data.city
+          district.value = json.data.district || ''
+        }
+      })
+      .catch(() => {})
+  }
+
+  const onLocated = (): Promise<void> => {
+    // GPS/IP 拿到坐标后，用后端坐标匹配纠正区名，再推送给后端
+    return correctDistrict().then(() => {
+      status.value = 'done'
+      if (lat.value != null && lng.value != null) {
+        updatedAt.value = new Date().toISOString()
+      }
+      pushToBackend()
+    })
+  }
+
   return tryDevice()
+    .then(() => onLocated())
     .catch(() => ipLocate().then((ip) => {
       lat.value = ip.lat
       lng.value = ip.lng
       city.value = ip.city
       district.value = ip.district
       source.value = 'ip'
+      return onLocated()
     }))
-    .catch(() => applyBackendDefault())
-    .then(() => {
-      status.value = 'done'
-      // 成功拿到新位置/坐标才更新时间戳 → 触发周边等依赖重算
-      if (lat.value != null && lng.value != null) {
-        updatedAt.value = new Date().toISOString()
-      }
-      pushToBackend()
-    })
+    .catch(() => backendDetect().then((d) => {
+      lat.value = d.lat
+      lng.value = d.lng
+      city.value = d.city
+      district.value = d.district
+      source.value = 'ip'
+      return onLocated()
+    }))
+    .catch(() => applyBackendDefault().then(() => onLocated()))
     .catch((e: any) => {
       // 定位失败：保留原有位置（不更新 updatedAt），周边继续用旧坐标
       status.value = 'error'
