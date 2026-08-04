@@ -45,6 +45,12 @@ const router = createRouter({
       component: () => import('@/views/NewsInfo.vue'),
       meta: { title: '资讯', icon: '📰' },
     },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('@/views/Settings.vue'),
+      meta: { title: '配置管理', icon: '⚙️' },
+    },
   ],
 })
 

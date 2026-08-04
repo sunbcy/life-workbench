@@ -17,6 +17,7 @@ const menuItems = [
   { path: '/nearby', name: 'nearby', title: '周边资源', icon: '📍', desc: 'Nearby' },
   { path: '/news', name: 'news', title: '资讯中心', icon: '📰', desc: 'News' },
   { path: '/profile', name: 'profile', title: '我的画像', icon: '🧬', desc: 'Profile' },
+  { path: '/settings', name: 'settings', title: '配置管理', icon: '⚙️', desc: 'Settings' },
 ]
 
 const activeMenu = computed(() => route.path)
