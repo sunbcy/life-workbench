@@ -146,6 +146,13 @@ class RssNewsService:
         self._cache_time: datetime | None = None
         self._cache_ttl = rss_cfg.get("cache_ttl", 300)  # 5分钟
 
+    # 单源网络超时（秒）。原 8s 偏长：N 个源并发时总耗时 = 最慢那一个，
+    # 压到 5s 既给足正常响应时间，又避免个别源卡死把首屏拖到 8s。
+    _SOURCE_TIMEOUT = 5.0
+    # 单源响应体解析上限（秒）。feedparser 解析不联网，但若某源返回超大 /
+    # 畸形 XML，CPU 解析可能长时间挂起，用 wait_for 兜底。
+    _PARSE_TIMEOUT = 5.0
+
     async def _fetch_one_source(self, client: "httpx.AsyncClient", source: dict) -> list[dict]:
         """抓取单个 RSS 源（异常由调用方处理，单源失败不影响整体）"""
         import feedparser
@@ -157,9 +164,13 @@ class RssNewsService:
                           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         }
         try:
-            resp = await client.get(url, headers=headers)
+            resp = await client.get(url, headers=headers, timeout=self._SOURCE_TIMEOUT)
             resp.raise_for_status()
-            feed = feedparser.parse(resp.text)
+            # 解析本身不联网，但用 wait_for 防止超大/畸形响应体长时间占 CPU
+            feed = await asyncio.wait_for(
+                asyncio.to_thread(feedparser.parse, resp.text),
+                timeout=self._PARSE_TIMEOUT,
+            )
         except Exception as e:
             log.warning(f"RSS 源抓取失败 {url}: {e}")
             return []
@@ -267,10 +278,13 @@ class RssNewsService:
         try:
             articles = await self._fetch_all_articles()
         except Exception as e:
+            # 抓取失败时不抛异常、不等待：若已有旧缓存则返回旧缓存；
+            # 若连缓存都没有（首次启动且预热失败），返回 [] 让上层回退到
+            # Mock 或空列表，避免用户请求被迫等满超时窗口。
             log.warning(f"RSS 抓取失败，尝试返回旧缓存: {e}")
             if self._cache is not None:
                 return self._cache
-            raise
+            return []
         self._cache = articles
         self._cache_time = now
         return articles
@@ -343,6 +357,10 @@ class RssNewsService:
         except Exception as e:
             log.warning(f"RSS 新闻服务失败，回退到 mock: {e}")
             return await MockNewsService().get_articles(category, keyword, sort, page, page_size)
+        # 缓存为空（首次启动且所有源抓取失败）时，回退到 Mock 保证有数据可看，
+        # 避免首屏在预热失败情况下既不报错、又长时间空白。
+        if not articles:
+            return await MockNewsService().get_articles(category, keyword, sort, page, page_size)
 
         if category and category != "all":
             articles = [a for a in articles if a["category"] == category]
@@ -379,6 +397,8 @@ class RssNewsService:
         try:
             articles = await self._get_cached_articles()
         except Exception:
+            return await MockNewsService().get_trending()
+        if not articles:
             return await MockNewsService().get_trending()
 
         trending = [a for a in articles if a["trending"]][:5]

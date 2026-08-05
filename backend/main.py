@@ -2,6 +2,7 @@
 生活工作台 - FastAPI 主入口
 基于位置的生活比价与资源发现平台
 """
+import asyncio
 import yaml
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -39,14 +40,17 @@ config = load_config()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时预热 RSS 新闻缓存，避免首个用户请求时才同步抓取导致卡顿
+    # 启动时预热 RSS 新闻缓存（后台异步，不阻塞端口就绪）。
+    # 关键：在 termux 等弱网/后台环境下，同步 await 抓取会拖慢启动、
+    # 让进程在启动时长时间占网络且无响应，易被 Android LMK 回收。
+    # 改为 fire-and-forget，服务立即监听端口，RSS 缓存在后台自行刷新。
     try:
         from api.news import news_service
         if hasattr(news_service, "warm_up"):
-            await news_service.warm_up()
-            print("[OK] 新闻 RSS 缓存预热完成")
+            asyncio.create_task(news_service.warm_up())
+            print("[OK] 新闻 RSS 缓存预热已转后台")
     except Exception as e:
-        print(f"[WARN] 新闻缓存预热失败（将在请求时按需抓取）: {e}")
+        print(f"[WARN] 新闻缓存预热调度失败（将在请求时按需抓取）: {e}")
     yield
 
 

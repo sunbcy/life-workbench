@@ -1,4 +1,5 @@
 """实时定位 API 路由"""
+import asyncio
 import logging
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -7,6 +8,12 @@ from services import geolocation
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/location", tags=["定位"])
+
+# 定位相关同步调用总超时（秒）。do_detect 内部最坏串行阻塞可达 10~20s，
+# 但绝对不应无限占住线程池。兜底超时后取消等待，避免极端弱网/死锁下
+# 线程池被占满、连累其他需要 to_thread 的请求全部排队饿死。
+LOCATION_TASK_TIMEOUT = 25.0
+REVERSE_GEOCODE_TIMEOUT = 15.0
 
 
 class LocationIn(BaseModel):
@@ -51,7 +58,20 @@ async def detect_location():
         return {"code": 500, "message": f"定位模块加载失败: {e}"}
 
     try:
-        result = do_detect(use_gps=True, use_network=True)
+        # 关键修复：do_detect 内部是同步阻塞调用
+        # (subprocess.run termux-location + 串行 httpx.get + urllib 逆地理编码，
+        # 最坏串行阻塞可达 10~20s)。若直接在 asyncio 事件循环里执行，
+        # 会卡死整个 worker，使所有请求（含 RSS 抓取）无响应，
+        # 在 termux 后台/弱网环境下极易被 Android LMK 杀掉进程。
+        # 用 to_thread 把它挪到线程池，事件循环得以继续处理其他请求；
+        # 外层再套 wait_for 总超时，防止极端弱网/死锁下线程池被占满饿死其他请求。
+        result = await asyncio.wait_for(
+            asyncio.to_thread(do_detect, use_gps=True, use_network=True),
+            timeout=LOCATION_TASK_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        log.warning("后端自动定位超时（%ss）", LOCATION_TASK_TIMEOUT)
+        return {"code": 504, "message": "定位超时，请检查网络或定位权限后重试"}
     except Exception as e:
         log.warning("后端自动定位失败: %s", e)
         return {"code": 500, "message": f"定位失败: {e}"}
@@ -98,9 +118,28 @@ async def reverse_geocode(body: ReverseGeocodeIn):
             "data": {"city": city, "district": district, "method": "coordinate-match"},
         }
 
-    # 坐标不在已知范围（非深圳），尝试 Nominatim
+    # 坐标不在已知范围（非深圳），尝试 Nominatim（urllib 同步网络调用，
+    # 同样需用 to_thread 避免阻塞事件循环，并套 wait_for 防止线程池被占满）
     from services.termux_location import _reverse_geocode
-    city, district = _reverse_geocode(body.lat, body.lng)
+    try:
+        city, district = await asyncio.wait_for(
+            asyncio.to_thread(_reverse_geocode, body.lat, body.lng),
+            timeout=REVERSE_GEOCODE_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        log.warning("逆地理编码超时（%ss）", REVERSE_GEOCODE_TIMEOUT)
+        return {
+            "code": 504,
+            "data": {"city": "", "district": "", "method": "timeout"},
+            "message": "逆地理编码超时",
+        }
+    except Exception as e:
+        log.warning("逆地理编码失败: %s", e)
+        return {
+            "code": 500,
+            "data": {"city": "", "district": "", "method": "error"},
+            "message": f"逆地理编码失败: {e}",
+        }
     return {
         "code": 0,
         "data": {"city": city or "", "district": district or "", "method": "nominatim" if city else "unknown"},
