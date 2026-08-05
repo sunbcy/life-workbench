@@ -51,12 +51,28 @@ class UserVectorizer:
         # 层级祖先泛化: 用户标注的兴趣地图节点 -> 其祖先路径词
         # (标了 Vue, 没标 前端开发 的文章也能通过 "前端" 路径词命中)
         ancestors = self._interest_ancestors()
+
+        # 隐式画像: 由用户真实行为(点击/停留/跳原文/不感兴趣)按 exp(-λΔt)
+        # 衰减聚合而来。正权重=感兴趣, 负权重=反感。
+        # 与显式画像分开存放, 由 Scorer 做加权融合, 保证显式配置始终可控。
+        implicit = self._implicit_topics()
+
         return {
             "skills": skills, "hobbies": hobbies, "goals": goals,
             "tracking": tracking, "excluded": excluded,
             "know": know, "want": want, "learning": learning, "tried": tried,
             "ancestors": ancestors,
+            "implicit": implicit,
         }
+
+    @staticmethod
+    def _implicit_topics() -> dict:
+        """读取行为反馈聚合出的隐式兴趣权重 {关键词: 权重(-1~1)}"""
+        try:
+            from services.feedback_store import get_implicit_topics
+            return get_implicit_topics()
+        except Exception:
+            return {}
 
     @staticmethod
     def _interest_ancestors() -> dict:

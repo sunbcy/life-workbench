@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
+import ConfigEditor from '../components/ConfigEditor.vue'
 
 // 配置从后端加载（即本地 config.yaml 的完整内容）
 const loading = ref(false)
@@ -52,51 +53,6 @@ async function saveConfig() {
 }
 
 // 把数字/布尔/字符串按类型渲染；对象/数组递归渲染
-function isObject(v: any) {
-  return v !== null && typeof v === 'object' && !Array.isArray(v)
-}
-function isArray(v: any) {
-  return Array.isArray(v)
-}
-function isBool(v: any) {
-  return typeof v === 'boolean'
-}
-function isNumber(v: any) {
-  return typeof v === 'number'
-}
-function isString(v: any) {
-  return typeof v === 'string'
-}
-// 多行字符串（含换行的私钥等）用 textarea
-function isMultiline(v: any) {
-  return typeof v === 'string' && v.includes('\n')
-}
-
-function onStringInput(node: any, key: string, e: Event) {
-  node[key] = (e.target as HTMLInputElement).value
-}
-function onNumberInput(node: any, key: string, e: Event) {
-  const raw = (e.target as HTMLInputElement).value
-  node[key] = raw === '' ? null : Number(raw)
-}
-function onBoolInput(node: any, key: string, e: Event) {
-  node[key] = (e.target as HTMLInputElement).checked
-}
-
-function addArrayItem(node: any, key: string) {
-  if (!Array.isArray(node[key])) node[key] = []
-  // 根据现有元素类型给默认值
-  const sample = node[key][0]
-  if (typeof sample === 'object' && sample !== null) {
-    node[key].push({ ...sample })
-  } else {
-    node[key].push('')
-  }
-}
-function removeArrayItem(node: any, key: string, idx: number) {
-  node[key].splice(idx, 1)
-}
-
 loadConfig()
 
 // ========== AI 配置：主流模型预设 ==========
@@ -172,9 +128,9 @@ function syncPresetHighlight() {
     <!-- 加载中 -->
     <div v-if="loading" class="card p-10 text-center text-gray-400 text-sm animate-pulse">读取本地配置中…</div>
 
-    <!-- 配置树（扁平化递归渲染） -->
+    <!-- 配置树（递归组件渲染任意层级） -->
     <div v-else-if="loaded" class="space-y-5">
-      <template v-for="(value, key) in config" :key="key">
+      <template v-for="(_, key) in config" :key="key">
         <section class="card p-5">
           <h2 class="text-sm font-bold text-gray-800 dark:text-gray-100 mb-4 flex items-center gap-2">
             <span class="w-1.5 h-4 rounded-full bg-primary-500"></span>
@@ -207,82 +163,7 @@ function syncPresetHighlight() {
             </p>
           </div>
 
-          <!-- 对象 -->
-          <div v-if="isObject(value)" class="space-y-3 pl-2">
-            <div v-for="(v, k) in value" :key="k" class="border-l-2 border-gray-100 dark:border-gray-700 pl-3">
-              <label class="block text-[11px] font-medium text-gray-500 dark:text-gray-400 mb-1">{{ k }}</label>
-
-              <!-- 嵌套对象 -->
-              <div v-if="isObject(v)" class="space-y-2 pl-2">
-                <div v-for="(vv, kk) in v" :key="kk">
-                  <label class="block text-[10px] text-gray-400 mb-0.5">{{ kk }}</label>
-                  <textarea v-if="isMultiline(vv)" :value="vv" @input="onStringInput(v, kk, $event)" rows="3" class="config-input font-mono text-xs"></textarea>
-                  <input v-else-if="isNumber(vv)" type="number" :value="vv" @input="onNumberInput(v, kk, $event)" class="config-input" />
-                  <input v-else-if="isBool(vv)" type="checkbox" :checked="vv" @change="onBoolInput(v, kk, $event)" class="w-4 h-4" />
-                  <input v-else :value="vv" @input="onStringInput(v, kk, $event)" class="config-input" />
-                </div>
-              </div>
-
-              <!-- 数组 -->
-              <div v-else-if="isArray(v)" class="space-y-2">
-                <div v-for="(item, idx) in v" :key="idx" class="border-l-2 border-gray-100 dark:border-gray-700 pl-3">
-                  <!-- 数组元素为对象：递归渲染 -->
-                  <div v-if="isObject(item)" class="space-y-2">
-                    <div v-for="(vv, kk) in item" :key="kk">
-                      <label class="block text-[10px] text-gray-400 mb-0.5">{{ kk }}</label>
-                      <textarea v-if="isMultiline(vv)" :value="vv" @input="onStringInput(item, kk, $event)" rows="3" class="config-input font-mono text-xs"></textarea>
-                      <input v-else-if="isNumber(vv)" type="number" :value="vv" @input="onNumberInput(item, kk, $event)" class="config-input" />
-                      <input v-else-if="isBool(vv)" type="checkbox" :checked="vv" @change="onBoolInput(item, kk, $event)" class="w-4 h-4" />
-                      <input v-else :value="vv" @input="onStringInput(item, kk, $event)" class="config-input" />
-                    </div>
-                    <button @click="removeArrayItem(value, k, idx)" class="text-[11px] text-red-600 dark:text-red-400 hover:underline">删除该项</button>
-                  </div>
-                  <!-- 数组元素为标量 -->
-                  <div v-else class="flex items-center gap-2">
-                    <input
-                      :value="item"
-                      @input="(e: any) => (v[idx] = e.target.value)"
-                      class="config-input flex-1"
-                    />
-                    <button @click="removeArrayItem(value, k, idx)" class="w-7 h-7 flex-shrink-0 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-red-100 dark:hover:bg-red-500/20 hover:text-red-500 transition-colors">✕</button>
-                  </div>
-                </div>
-                <button @click="addArrayItem(value, k)" class="text-[11px] text-primary-600 dark:text-primary-400 hover:underline">+ 添加一项</button>
-              </div>
-
-              <!-- 多行字符串 -->
-              <textarea v-else-if="isMultiline(v)" :value="v" @input="onStringInput(value, k, $event)" rows="3" class="config-input font-mono text-xs"></textarea>
-              <!-- 数字 -->
-              <input v-else-if="isNumber(v)" type="number" :value="v" @input="onNumberInput(value, k, $event)" class="config-input" />
-              <!-- 布尔 -->
-              <label v-else-if="isBool(v)" class="flex items-center gap-2">
-                <input type="checkbox" :checked="v" @change="onBoolInput(value, k, $event)" class="w-4 h-4" />
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ v ? 'true' : 'false' }}</span>
-              </label>
-              <!-- 字符串 -->
-              <input v-else :value="v" @input="onStringInput(value, k, $event)" class="config-input" />
-            </div>
-          </div>
-
-          <!-- 顶层数组 -->
-          <div v-else-if="isArray(value)" class="space-y-2">
-            <div v-for="(item, idx) in value" :key="idx" class="flex items-center gap-2">
-              <input :value="item" @input="(e: any) => (config[key][idx] = e.target.value)" class="config-input flex-1" />
-              <button @click="removeArrayItem(config, key, idx)" class="w-7 h-7 flex-shrink-0 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-red-100 dark:hover:bg-red-500/20 hover:text-red-500 transition-colors">✕</button>
-            </div>
-            <button @click="addArrayItem(config, key)" class="text-[11px] text-primary-600 dark:text-primary-400 hover:underline">+ 添加一项</button>
-          </div>
-
-          <!-- 顶层标量 -->
-          <div v-else>
-            <textarea v-if="isMultiline(value)" :value="value" @input="onStringInput(config, key, $event)" rows="3" class="config-input font-mono text-xs"></textarea>
-            <input v-else-if="isNumber(value)" type="number" :value="value" @input="onNumberInput(config, key, $event)" class="config-input" />
-            <label v-else-if="isBool(value)" class="flex items-center gap-2">
-              <input type="checkbox" :checked="value" @change="onBoolInput(config, key, $event)" class="w-4 h-4" />
-              <span class="text-xs text-gray-500 dark:text-gray-400">{{ value ? 'true' : 'false' }}</span>
-            </label>
-            <input v-else :value="value" @input="onStringInput(config, key, $event)" class="config-input" />
-          </div>
+          <ConfigEditor v-model="config[key as keyof typeof config]" />
         </section>
       </template>
 

@@ -2,9 +2,15 @@
 评分器 — 计算用户向量与内容向量之间的综合匹配分数
 
 公式:
-    final_score = 0.45 × personal_relevance + 0.30 × trending_score + 0.25 × freshness_score
+    final_score = w_p × personal_relevance + w_t × trending_score + w_f × freshness_score
 
     personal_relevance = Σ(weight_dim × similarity_dim(user, item))
+
+权重动态化 (P0 修正):
+    RSS 源普遍不提供 read_count（恒为 0），此时 trending_score 退化为常量，
+    既无区分度又白白吃掉 30% 权重，导致排序实际由 freshness 主导。
+    因此当热度信号缺失时，把 WEIGHT_TRENDING 按比例转移给
+    personal / freshness，让个性化真正生效。
 """
 
 import math
@@ -22,6 +28,22 @@ DIM_WEIGHTS = {
 WEIGHT_PERSONAL = 0.45
 WEIGHT_TRENDING = 0.30
 WEIGHT_FRESHNESS = 0.25
+
+# 热度权重缺失时的再分配比例（个性化拿大头，剩余给新鲜度）
+TRENDING_FALLBACK_TO_PERSONAL = 0.7
+
+# ============================================================
+# 显式 / 隐式画像融合系数
+# 显式（手填 + 兴趣地图打标）保证可控性与冷启动表现；
+# 隐式（点击/停留/跳原文 行为学习）保证系统能随兴趣漂移自我进化。
+# 二者线性融合，显式占主导，避免行为噪声劫持画像。
+# ============================================================
+W_EXPLICIT = 0.6
+W_IMPLICIT = 0.4
+# 负反馈惩罚强度（implicit 权重为负时按此系数扣分）
+IMPLICIT_NEGATIVE_FACTOR = 0.8
+# 隐式权重达到多少才值得向用户解释「为什么推荐」
+IMPLICIT_REASON_THRESHOLD = 0.25
 
 
 class Scorer:
@@ -83,17 +105,29 @@ class Scorer:
             if score > 0.3
         ]
 
-        # 流行度评分
-        trending_score = self._trending_score(item, item_type)
+        # 流行度评分（has_signal=False 表示数据源未提供热度信号）
+        trending_score, has_trending_signal = self._trending_score(item, item_type)
 
         # 新鲜度评分
         freshness_score = self._freshness_score(item, item_type)
 
-        # 综合评分
+        # 动态权重：热度信号缺失时，把 trending 权重转移给 personal / freshness，
+        # 避免常量项吃掉 30% 权重、把个性化差异冲淡。
+        if has_trending_signal:
+            w_personal, w_trending, w_freshness = (
+                WEIGHT_PERSONAL, WEIGHT_TRENDING, WEIGHT_FRESHNESS
+            )
+        else:
+            shift = WEIGHT_TRENDING
+            w_personal = WEIGHT_PERSONAL + shift * TRENDING_FALLBACK_TO_PERSONAL
+            w_freshness = WEIGHT_FRESHNESS + shift * (1 - TRENDING_FALLBACK_TO_PERSONAL)
+            w_trending = 0.0
+            trending_score = 0.0
+
         composite_score = (
-            WEIGHT_PERSONAL * personal_relevance +
-            WEIGHT_TRENDING * trending_score +
-            WEIGHT_FRESHNESS * freshness_score
+            w_personal * personal_relevance +
+            w_trending * trending_score +
+            w_freshness * freshness_score
         )
 
         return {
@@ -104,6 +138,12 @@ class Scorer:
             "match_dimensions": match_dimensions,
             "match_reasons": all_reasons[:3],     # 最多3条原因
             "personalized": personal_relevance > 0.2,
+            # 便于前端/调试观察本次实际生效的权重
+            "weights": {
+                "personal": round(w_personal, 3),
+                "trending": round(w_trending, 3),
+                "freshness": round(w_freshness, 3),
+            },
         }
 
     # ============================================================
@@ -203,8 +243,38 @@ class Scorer:
         goal_hits = sum(1 for g in goals if g in text)
         goal_score = min(goal_hits / max(len(goals), 1), 1.0) * 0.8
 
-        combined = max(max_topic_score, skill_score, weak_score, hobby_score, goal_score)
-        return combined, reasons
+        explicit = max(max_topic_score, skill_score, weak_score, hobby_score, goal_score)
+
+        # ---- 隐式信号融合 ----
+        # 显式画像(手填/打标)保证可控性与冷启动, 隐式画像(行为学习)保证进化能力。
+        # final = explicit × W_EXPLICIT + implicit_positive × W_IMPLICIT
+        # 负向隐式信号(不感兴趣)直接作为惩罚项扣减, 强负反馈可将分数压到 0。
+        implicit = uv.get("implicit", {})
+        if not implicit:
+            return explicit, reasons
+
+        pos_score, pos_kw = 0.0, ""
+        neg_score, neg_kw = 0.0, ""
+        for kw, w in implicit.items():
+            if not kw:
+                continue
+            if not (kw in text or any(kw in t for t in tags) or kw == category):
+                continue
+            if w > pos_score:
+                pos_score, pos_kw = w, kw
+            elif w < neg_score:
+                neg_score, neg_kw = w, kw
+
+        combined = explicit * W_EXPLICIT + pos_score * W_IMPLICIT
+        if pos_kw and pos_score >= IMPLICIT_REASON_THRESHOLD:
+            reasons.append(f"你常读「{pos_kw}」相关内容")
+
+        if neg_score < 0:
+            combined += neg_score * IMPLICIT_NEGATIVE_FACTOR
+            if neg_kw and neg_score <= -IMPLICIT_REASON_THRESHOLD:
+                reasons.append(f"你曾对「{neg_kw}」表示不感兴趣")
+
+        return max(0.0, min(1.0, combined)), reasons
 
     def _location_match(self, uv: dict, iv: dict, item_type: str) -> tuple[float, list[str]]:
         """地理位置匹配"""
@@ -492,30 +562,50 @@ class Scorer:
     # 通用评分函数
     # ============================================================
 
-    def _trending_score(self, item: dict, item_type: str) -> float:
-        """计算流行度 / 趋势得分"""
+    def _trending_score(self, item: dict, item_type: str) -> tuple[float, bool]:
+        """计算流行度 / 趋势得分
+
+        Returns:
+            (score, has_signal)
+            has_signal=False 表示该内容项根本没有可用的热度信号
+            （典型场景：RSS 文章 read_count 恒为 0），
+            此时调用方应把热度权重转移给其它因子，而不是记一个常量分。
+        """
         if item_type == "news":
-            if item.get("trending"):
-                return 1.0
-            read_count = item.get("read_count", 0)
+            read_count = item.get("read_count", 0) or 0
+            is_trending = bool(item.get("trending"))
+
+            # RSS 场景：read_count 恒为 0，且 trending 只是「最新 N 篇」的
+            # 人工标记，本质是新鲜度的重复表达，不构成真实热度信号。
+            if read_count <= 0:
+                return 0.0, False
+
             if read_count > 30000:
-                return 0.9
+                score = 0.9
             elif read_count > 10000:
-                return 0.7
+                score = 0.7
             elif read_count > 5000:
-                return 0.5
-            return 0.3
+                score = 0.5
+            else:
+                score = 0.3
+            if is_trending:
+                score = 1.0
+            return score, True
+
         elif item_type == "product":
             trend = item.get("trend", "stable")
             trend_pct = abs(item.get("trend_pct", 0))
             if trend == "down" and trend_pct > 5:
-                return 0.9  # 降价热门
+                return 0.9, True  # 降价热门
             elif trend_pct > 10:
-                return 0.7
-            return 0.5
+                return 0.7, True
+            return 0.5, True
+
         elif item_type == "nearby":
-            rating = item.get("rating", 0)
-            reviews = item.get("review_count", 0)
+            rating = item.get("rating", 0) or 0
+            reviews = item.get("review_count", 0) or 0
+            if rating <= 0 and reviews <= 0:
+                return 0.0, False
             score = 0.3
             if rating >= 4.5:
                 score += 0.3
@@ -523,8 +613,9 @@ class Scorer:
                 score += 0.3
             elif reviews > 1000:
                 score += 0.2
-            return min(score, 1.0)
-        return 0.5
+            return min(score, 1.0), True
+
+        return 0.5, True
 
     def _freshness_score(self, item: dict, item_type: str) -> float:
         """计算新鲜度得分 (指数衰减)"""

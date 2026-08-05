@@ -19,13 +19,19 @@ export interface Recommendation {
   match_dimensions: string[]
   match_reasons: string[]
   personalized: boolean
+  /** 本次评分实际生效的权重（热度信号缺失时会动态再分配） */
+  weights?: {
+    personal: number
+    trending: number
+    freshness: number
+  }
 }
 
 // ========== Feed 混合内容类型 ==========
 export type FeedItemType = 'news' | 'product' | 'nearby'
 
 export interface FeedItem {
-  id: number
+  id: string | number
   _recommendation?: Recommendation
   // Common fields
   title?: string
@@ -205,7 +211,8 @@ export interface NewsCategory {
 }
 
 export interface NewsArticle {
-  id: number
+  // RSS 文章使用 link 的 md5 全串（string）；mock 数据仍为 number
+  id: string | number
   category: string
   title: string
   summary: string
@@ -216,6 +223,7 @@ export interface NewsArticle {
   tags: string[]
   read_count: number
   trending: boolean
+  link?: string
   _recommendation?: Recommendation
 }
 

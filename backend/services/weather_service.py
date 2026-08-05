@@ -193,8 +193,13 @@ class QWeatherService:
 
     @property
     def _location_param(self) -> str:
-        """和风天气 location 参数：优先使用实时经纬度 (lat,lng)，否则回退配置 location_id"""
-        if self._lat is not None and self._lng is not None:
+        """和风天气 location 参数。
+
+        JWT 项目（Ed25519）通常绑定固定 LocationID 权限，不接受经纬度坐标查询，
+        因此 JWT 模式强制使用配置中的 location_id，避免无谓的 400 试错。
+        API Key 模式则优先使用实时经纬度 (lat,lng)，否则回退 location_id。
+        """
+        if not self._use_jwt and self._lat is not None and self._lng is not None:
             return f"{self._lat:.4f},{self._lng:.4f}"
         return self.location_id
 
@@ -232,8 +237,12 @@ class QWeatherService:
     # 核心请求方法 — 带完整 traceback 和 HTTP 调试日志
     # ----------------------------------------------------------------
 
-    async def _fetch(self, endpoint: str) -> dict:
-        """调用和风天气 API，失败时输出完整 traceback + HTTP 请求/响应详情"""
+    async def _fetch(self, endpoint: str, *, _retry_with_id: bool = True) -> dict:
+        """调用和风天气 API，失败时输出完整 traceback + HTTP 请求/响应详情
+
+        当使用实时经纬度查询返回 400 (Invalid Parameter: location) 时，
+        自动回退到配置中的固定 LocationID 重试一次（JWT 项目通常绑定 LocationID 权限）。
+        """
         import httpx
 
         url = f"{self._base_url}/{endpoint}"
@@ -283,20 +292,35 @@ class QWeatherService:
 
             error_body = _safe_json_or_text(resp.content)
 
-            # 检测「订阅权限不足」403 — 这是预期中的情况，不用 error 级别
-            if resp.status_code == 403 and "No permission" in error_body:
+            # 检测「订阅权限不足 / 接口已废弃」403 — 预期情况，不用 error 级别
+            # 和风对未订阅端点返回 403 No permission；对废弃端点返回 403 Deprecated
+            if resp.status_code == 403 and (
+                "No permission" in error_body or "Deprecated" in error_body
+            ):
+                reason = "当前订阅不含此端点" if "No permission" in error_body else "接口已废弃"
                 log.info(
-                    "和风天气 [%d] 当前订阅不含此端点 (%s)，跳过\n"
-                    "  提示: 升级订阅后可获取此数据\n"
+                    "和风天气 [%d] %s (%s)，跳过\n"
                     "  URL: %s",
-                    resp.status_code, endpoint, url,
+                    resp.status_code, reason, endpoint, url,
                 )
                 raise QWeatherPermissionError(
-                    f"端点 '{endpoint}' 需要更高订阅等级。"
-                    f"详情: {_json.loads(error_body).get('error', {}).get('detail', error_body)}"
-                    if error_body.startswith("{") else
-                    f"端点 '{endpoint}' 需要更高订阅等级"
+                    f"端点 '{endpoint}' 不可用（{reason}）。"
                 )
+
+            # 检测「Invalid Parameter: location」400 — 经纬度不被接受，回退 LocationID 重试
+            if (
+                resp.status_code == 400
+                and _retry_with_id
+                and self._lat is not None
+                and str(location_param) == f"{self._lat:.4f},{self._lng:.4f}"
+            ):
+                log.warning(
+                    "和风天气 [%d] location 参数(%s)无效，回退到 LocationID=%s 重试",
+                    resp.status_code, location_param, self.location_id,
+                )
+                self._lat = None
+                self._lng = None
+                return await self._fetch(endpoint, _retry_with_id=False)
 
             # 其他 HTTP 错误
             log.error(

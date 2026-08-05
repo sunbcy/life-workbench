@@ -46,19 +46,34 @@ class RecommendationEngine:
         """获取各维度状态"""
         return self.profile_loader.dimensions_status()
 
-    def recommend(self, items: list[dict], item_type: str = "news") -> list[dict]:
+    def recommend(
+        self, items: list[dict], item_type: str = "news",
+        preserve_order: bool = False,
+        mode: str = "rank",
+        pin_limit: int | None = None,
+        pin_threshold: float | None = None,
+    ) -> list[dict]:
         """
         对一批内容项进行个性化评分和排序
 
         Args:
             items: 原始内容项列表
             item_type: news | product | nearby
+            preserve_order: 兼容旧调用。True 等价于 mode="score_only"。
+            mode: 排列策略
+                - "rank"        : 按综合分重排 + 多样性（推荐流）
+                - "priority"    : Feedly 优先收件箱 —— 时间线不变，高分置顶
+                - "score_only"  : 只打分，完全不改变顺序
+            pin_limit / pin_threshold: 仅 mode="priority" 时生效
 
         Returns:
-            带 _recommendation 字段的排序后列表
+            带 _recommendation 字段的列表
         """
         if not items:
             return items
+
+        if preserve_order:
+            mode = "score_only"
 
         user_vector = self.user_vectorizer.vectorize(self.profile_loader.profile)
 
@@ -68,6 +83,12 @@ class RecommendationEngine:
                 user_vector, item_vector, item, item_type
             )
 
+        if mode == "score_only":
+            return items
+        if mode == "priority":
+            return self.ranker.priority_inbox(
+                items, pin_threshold=pin_threshold, pin_limit=pin_limit
+            )
         return self.ranker.rank(items, item_type)
 
     def score_mixed(self, items: list[dict]) -> list[dict]:

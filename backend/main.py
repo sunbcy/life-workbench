@@ -4,6 +4,7 @@
 """
 import yaml
 from pathlib import Path
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -34,10 +35,26 @@ def load_config():
 
 
 config = load_config()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动时预热 RSS 新闻缓存，避免首个用户请求时才同步抓取导致卡顿
+    try:
+        from api.news import news_service
+        if hasattr(news_service, "warm_up"):
+            await news_service.warm_up()
+            print("[OK] 新闻 RSS 缓存预热完成")
+    except Exception as e:
+        print(f"[WARN] 新闻缓存预热失败（将在请求时按需抓取）: {e}")
+    yield
+
+
 app = FastAPI(
     title=config["app"]["name"],
     version=config["app"]["version"],
     description=config["app"]["description"],
+    lifespan=lifespan,
 )
 
 # CORS 中间件 - 允许前端跨域访问
