@@ -1,6 +1,9 @@
 """天气 API 路由"""
+import logging
 from fastapi import APIRouter
 from services import create_weather_service, geolocation
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/weather", tags=["天气"])
 
@@ -26,6 +29,7 @@ def _apply_real_location() -> None:
 @router.get("/current")
 async def get_current_weather():
     """获取当前天气（基于真实定位位置）"""
+    log.info("天气请求: current")
     _apply_real_location()
     data = await weather_service.get_current()
     return {"code": 0, "data": data}
@@ -34,6 +38,7 @@ async def get_current_weather():
 @router.get("/forecast")
 async def get_forecast():
     """获取天气预报（基于真实定位位置）"""
+    log.info("天气请求: forecast")
     _apply_real_location()
     data = await weather_service.get_forecast()
     return {"code": 0, "data": data}
@@ -42,6 +47,7 @@ async def get_forecast():
 @router.get("/alerts")
 async def get_alerts():
     """获取天气预警（基于真实定位位置）"""
+    log.info("天气请求: alerts")
     _apply_real_location()
     data = await weather_service.get_alerts()
     return {"code": 0, "data": data}
@@ -50,6 +56,7 @@ async def get_alerts():
 @router.get("/full")
 async def get_full_weather():
     """获取完整天气信息（基于真实定位位置）"""
+    log.info("天气请求: full")
     _apply_real_location()
     data = await weather_service.get_full()
     return {"code": 0, "data": data}

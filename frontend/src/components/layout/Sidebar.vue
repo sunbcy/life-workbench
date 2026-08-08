@@ -5,6 +5,7 @@ import { useApi } from '@/composables/useApi'
 import { useSidebar } from '@/composables/useSidebar'
 import { usePersonalization } from '@/composables/usePersonalization'
 import { useLocation } from '@/composables/useLocation'
+import { useLogToggle } from '@/composables/useLogToggle'
 import type { ProfileSummary } from '@/types'
 
 const route = useRoute()
@@ -37,6 +38,9 @@ const { enabled: personalizedEnabled, toggle: togglePersonalization } = usePerso
 
 // 实时定位（设备 GPS / 网络 IP / 默认）
 const { label: locationLabel, sourceLabel: locationSource, status: locationStatus, locate: refreshLocation } = useLocation()
+
+// 后端日志开关（持久化 + 实时同步后端）
+const { enabled: logEnabled, toggle: toggleLog } = useLogToggle()
 </script>
 
 <template>
@@ -116,6 +120,33 @@ const { label: locationLabel, sourceLabel: locationSource, status: locationStatu
               :class="[
                 'inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200',
                 personalizedEnabled ? 'translate-x-5' : 'translate-x-1'
+              ]"
+            ></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 后端日志开关 -->
+      <div class="px-3 py-2">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-sm">📝</span>
+            <span class="text-xs font-medium text-gray-600 dark:text-gray-400">后端日志</span>
+          </div>
+          <button
+            @click="toggleLog"
+            type="button"
+            role="switch"
+            :aria-checked="logEnabled"
+            :class="[
+              'relative inline-flex w-11 h-6 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800',
+              logEnabled ? 'bg-primary-500' : 'bg-gray-300 dark:bg-gray-600'
+            ]"
+          >
+            <span
+              :class="[
+                'inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200',
+                logEnabled ? 'translate-x-5' : 'translate-x-1'
               ]"
             ></span>
           </button>

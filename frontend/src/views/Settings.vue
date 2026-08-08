@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import ConfigEditor from '../components/ConfigEditor.vue'
+import { useLogToggle } from '@/composables/useLogToggle'
 
 // 配置从后端加载（即本地 config.yaml 的完整内容）
 const loading = ref(false)
@@ -85,6 +86,9 @@ function syncPresetHighlight() {
   const hit = aiPresets.find((p) => p.base_url === cur)
   aiActivePreset.value = hit ? hit.id : ''
 }
+
+// 后端日志开关（持久化到 localStorage，并实时同步后端级别）
+const { enabled: logEnabled, toggle: toggleLog } = useLogToggle()
 </script>
 
 <template>
@@ -116,6 +120,38 @@ function syncPresetHighlight() {
         </button>
       </div>
     </div>
+
+    <!-- 后端日志开关 -->
+    <section class="card p-5 mb-5">
+      <div class="flex items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-slate-400 to-gray-600 flex items-center justify-center text-sm shadow-sm">📝</div>
+          <div>
+            <h2 class="text-sm font-bold text-gray-800 dark:text-gray-100">后端日志</h2>
+            <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 leading-relaxed">
+              开启后，后端会在终端为每次接口调用打印一行简洁日志（方法 / 路径 / 状态码 / 耗时），便于排查问题；关闭则只记录错误。设置持久化到本地，并实时同步给后端。
+            </p>
+          </div>
+        </div>
+        <button
+          @click="toggleLog"
+          type="button"
+          role="switch"
+          :aria-checked="logEnabled"
+          :class="[
+            'relative inline-flex w-11 h-6 flex-shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800',
+            logEnabled ? 'bg-primary-500' : 'bg-gray-300 dark:bg-gray-600'
+          ]"
+        >
+          <span
+            :class="[
+              'inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200',
+              logEnabled ? 'translate-x-5' : 'translate-x-1'
+            ]"
+          ></span>
+        </button>
+      </div>
+    </section>
 
     <!-- 状态提示 -->
     <div v-if="error" class="mb-4 p-3 rounded-xl bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 text-sm">

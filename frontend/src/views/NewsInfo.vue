@@ -4,7 +4,7 @@ import { useApiList } from '@/composables/useApi'
 import { useFeedback } from '@/composables/useFeedback'
 import ArticleCard from '@/components/news/ArticleCard.vue'
 import TrendingSidebar from '@/components/news/TrendingSidebar.vue'
-import type { NewsArticle, NewsCategory } from '@/types'
+import type { NewsArticle, NewsCategory, UserNeed, NewsChannel } from '@/types'
 
 const { reportClick, reportDwell, reportOpenLink, reportNotInterested } = useFeedback()
 
@@ -31,6 +31,71 @@ const sourceFilter = ref('') // 按来源筛选（空=全部）
 const sourceGroups = ref<{ domestic: string[]; foreign: string[] }>({ domestic: [], foreign: [] })
 const sourceOptions = computed(() => [...sourceGroups.value.domestic, ...sourceGroups.value.foreign])
 
+// 视图模式：normal（常规资讯流） / ai（AI 深度推荐）
+const viewMode = ref<'normal' | 'ai'>('normal')
+// 地理圈层（维度一 & 二）：district(区) / city(市)，仅当地新闻生效
+const geoScope = ref<'district' | 'city'>('district')
+// AI 推荐：用户诉求 & 推荐列表
+const userNeeds = ref<UserNeed[]>([])
+const aiLoading = ref(false)
+const aiError = ref<string | null>(null)
+const aiViewActive = computed(() => viewMode.value === 'ai')
+
+// 当地新闻分类激活时展示「范围层级」切换
+const isLocalCategory = computed(() => activeCategory.value === 'local')
+
+// 待接入渠道清单（前端「更多来源」入口，标注 pending；点击弹出待接入说明）
+const channels = ref<NewsChannel[]>([])
+const showChannelTip = ref<NewsChannel | null>(null)
+
+async function loadChannels() {
+  try {
+    const resp = await fetch('/api/news/channels')
+    const json = await resp.json()
+    if (json.code === 0) channels.value = json.data || []
+  } catch (e) {
+    channels.value = []
+  }
+}
+
+async function loadAiRecommend() {
+  if (aiLoading.value) return
+  aiLoading.value = true
+  aiError.value = null
+  try {
+    const resp = await fetch('/api/news/recommend?limit=20&use_llm=true')
+    const json = await resp.json()
+    if (json.code !== 0) throw new Error(json.message || '加载失败')
+    articles.value = json.data || []
+    userNeeds.value = json.needs || []
+    total.value = json.total || articles.value.length
+    hasMore.value = false
+  } catch (e: any) {
+    aiError.value = e?.message || 'AI 推荐加载失败'
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+// 切换视图模式：进入 AI 推荐即拉取；返回常规时重置常规列表
+function onViewModeChange(mode: 'normal' | 'ai') {
+  viewMode.value = mode
+  if (mode === 'ai') {
+    loadAiRecommend()
+  } else {
+    resetAndFetch()
+  }
+}
+
+// 切换地理圈层（区/市）后重新拉取当地新闻
+function onGeoScopeChange() {
+  if (viewMode.value === 'ai') {
+    loadAiRecommend()
+  } else {
+    resetAndFetch()
+  }
+}
+
 // 详情弹窗
 const showDetail = ref(false)
 const selectedArticle = ref<NewsArticle | null>(null)
@@ -56,7 +121,7 @@ async function loadSources() {
 }
 
 function buildParams(p: number) {
-  return {
+  const params: Record<string, string | number> = {
     category: activeCategory.value,
     keyword: keyword.value,
     sort: sortBy.value,
@@ -64,6 +129,11 @@ function buildParams(p: number) {
     page: p,
     page_size: pageSize,
   }
+  // 地理圈层仅当地新闻分类生效（维度一 & 二）
+  if (activeCategory.value === 'local') {
+    params.geo_scope = geoScope.value
+  }
+  return params
 }
 
 // 单飞锁：确保任意时刻只有一个 articles 请求在途，杜绝 page 并发自增
@@ -276,6 +346,7 @@ function onScrollCapture(e: Event) {
 
 onMounted(() => {
   loadSources()
+  loadChannels()
   resetAndFetch()
   document.addEventListener('scroll', onScrollCapture, { passive: true, capture: true })
   onScroll()
@@ -331,6 +402,60 @@ onBeforeUnmount(() => {
               <option v-for="opt in sortOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
             </select>
           </div>
+        </div>
+
+        <!-- 视图模式切换：常规资讯流 / AI 深度推荐（维度三） -->
+        <div class="flex items-center gap-2 mb-3">
+          <button
+            @click="onViewModeChange('normal')"
+            :class="[
+              'px-4 py-1.5 rounded-xl text-xs font-medium transition-all duration-200',
+              !aiViewActive
+                ? 'bg-primary-500 text-white shadow-lg shadow-primary-500/25'
+                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:border-primary-300'
+            ]"
+          >
+            📰 资讯流
+          </button>
+          <button
+            @click="onViewModeChange('ai')"
+            :class="[
+              'px-4 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 flex items-center gap-1.5',
+              aiViewActive
+                ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-500/25'
+                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:border-violet-300'
+            ]"
+          >
+            🤖 AI 深度推荐
+          </button>
+        </div>
+
+        <!-- 当地新闻：地理圈层切换（维度一 & 二：区 -> 市） -->
+        <div v-if="isLocalCategory && !aiViewActive" class="flex items-center gap-2 mb-3">
+          <span class="text-[10px] text-gray-400 shrink-0">范围:</span>
+          <button
+            @click="geoScope = 'district'; onGeoScopeChange()"
+            :class="[
+              'px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all',
+              geoScope === 'district'
+                ? 'bg-emerald-500 text-white'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+            ]"
+          >
+            📍 本区（影响优先）
+          </button>
+          <button
+            @click="geoScope = 'city'; onGeoScopeChange()"
+            :class="[
+              'px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all',
+              geoScope === 'city'
+                ? 'bg-emerald-500 text-white'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+            ]"
+          >
+            🌆 全市（扩大范围）
+          </button>
+          <span class="text-[10px] text-gray-400 ml-1">按影响范围向你集中</span>
         </div>
 
         <!-- 分类标签（数量少，换行显示确保全部可见，避免窄屏被横向滚动隐藏） -->
@@ -400,6 +525,78 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <!-- 更多来源（待接入渠道入口，标注 pending；点击弹出说明） -->
+        <div v-if="channels.length" class="mb-6">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-[10px] text-gray-400 shrink-0">更多来源(待接入):</span>
+            <button
+              v-for="ch in channels"
+              :key="ch.id"
+              @click="showChannelTip = ch"
+              :class="[
+                'px-3 py-1.5 rounded-lg text-[11px] font-medium whitespace-nowrap transition-all',
+                'bg-gray-50 dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-dashed border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700'
+              ]"
+            >
+              {{ ch.icon }} {{ ch.name }}
+              <span class="ml-1 text-[9px] opacity-70">待接入</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 待接入渠道说明弹窗 -->
+        <div
+          v-if="showChannelTip"
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          @click.self="showChannelTip = null"
+        >
+          <div class="card max-w-sm w-full p-5">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="text-xl">{{ showChannelTip.icon }}</span>
+              <h3 class="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                {{ showChannelTip.name }}
+              </h3>
+              <span class="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-300">
+                待接入
+              </span>
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed mb-3">
+              {{ showChannelTip.note }}
+            </p>
+            <p class="text-[11px] text-gray-400 mb-1">接入示例：</p>
+            <code class="block text-[11px] bg-gray-100 dark:bg-gray-800 rounded-lg px-2 py-1.5 text-gray-600 dark:text-gray-300 break-all">
+              {{ showChannelTip.example }}
+            </code>
+            <button
+              class="mt-4 w-full py-2 rounded-lg bg-primary-500 text-white text-xs font-medium"
+              @click="showChannelTip = null"
+            >
+              知道了
+            </button>
+          </div>
+        </div>
+
+
+        <!-- AI 深度推荐：加载 / 错误态 -->
+        <div v-if="aiViewActive && aiLoading" class="space-y-4">
+          <div v-for="i in 5" :key="i" class="card p-5 animate-pulse">
+            <div class="flex gap-4">
+              <div class="w-14 h-14 bg-gray-100 dark:bg-gray-700 rounded-2xl"></div>
+              <div class="flex-1 space-y-2">
+                <div class="h-4 bg-gray-100 dark:bg-gray-700 rounded-lg w-3/4"></div>
+                <div class="h-3 bg-gray-100 dark:bg-gray-700 rounded-lg w-full"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="aiViewActive && aiError" class="card p-8 text-center">
+          <p class="text-4xl mb-3">⚠️</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400">AI 推荐加载失败</p>
+          <p class="text-xs text-gray-400 mt-1">{{ aiError }}</p>
+          <button @click="loadAiRecommend" class="mt-4 px-4 py-2 rounded-xl text-xs font-medium bg-violet-500 text-white hover:bg-violet-600 transition-colors">
+            🔄 重试
+          </button>
+        </div>
 
         <!-- 文章列表 -->
         <div v-if="loading" class="space-y-4">
@@ -431,19 +628,56 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else class="space-y-4">
-          <div class="text-xs text-gray-400 mb-2">
+          <!-- AI 深度推荐：用户诉求画像 -->
+          <div v-if="aiViewActive" class="card p-4 mb-1">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-sm font-semibold text-gray-800 dark:text-gray-100">🤖 为你解析的诉求</span>
+              <span class="text-[10px] text-violet-500">基于你的画像推断</span>
+            </div>
+            <div v-if="userNeeds.length" class="flex flex-wrap gap-1.5">
+              <span
+                v-for="need in userNeeds"
+                :key="need.topic"
+                class="text-[10px] px-2 py-0.5 rounded-lg bg-violet-50 dark:bg-violet-500/10 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-500/20"
+                :title="need.reason"
+              >
+                {{ need.category }} · {{ need.topic }}
+              </span>
+            </div>
+            <p v-else class="text-[11px] text-gray-400">尚未配置画像，已按最新资讯展示。去「画像」页打标可获得精准推荐。</p>
+          </div>
+
+          <div v-if="!aiViewActive" class="text-xs text-gray-400 mb-2">
             共 <span class="font-semibold text-gray-600 dark:text-gray-300">{{ total }}</span> 条资讯
             <span v-if="sourceFilter" class="ml-1">· 来源：{{ sourceFilter }}</span>
           </div>
 
-          <ArticleCard
-            v-for="article in articles"
-            :key="article.id"
-            :article="article"
-            @click="openDetail"
-            @not-interested="onNotInterested"
-            @open-link="onOpenOriginal"
-          />
+          <template v-for="article in articles" :key="article.id">
+            <!-- AI 模式：推荐理由条（可解释性） -->
+            <div
+              v-if="aiViewActive && (article._ai_reason || (article._needs && article._needs.length))"
+              class="flex items-start gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-violet-50 to-fuchsia-50 dark:from-violet-500/10 dark:to-fuchsia-500/10 border border-violet-200/60 dark:border-violet-500/20"
+            >
+              <span class="text-[10px] mt-0.5 shrink-0 px-1.5 py-0.5 rounded bg-violet-500 text-white font-bold">荐</span>
+              <div class="min-w-0">
+                <p class="text-[11px] text-violet-800 dark:text-violet-200 leading-snug">{{ article._ai_reason }}</p>
+                <div v-if="article._needs && article._needs.length" class="flex flex-wrap gap-1 mt-1">
+                  <span
+                    v-for="n in article._needs"
+                    :key="n"
+                    class="text-[9px] px-1.5 py-0.5 rounded bg-white/70 dark:bg-gray-800/60 text-violet-700 dark:text-violet-300"
+                  >#{{ n }}</span>
+                </div>
+              </div>
+            </div>
+
+            <ArticleCard
+              :article="article"
+              @click="openDetail"
+              @not-interested="onNotInterested"
+              @open-link="onOpenOriginal"
+            />
+          </template>
 
           <!-- 加载状态提示 -->
           <div v-if="loadingMore" class="pt-2 pb-6 text-center text-xs text-gray-400">

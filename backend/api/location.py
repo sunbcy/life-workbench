@@ -27,12 +27,14 @@ class LocationIn(BaseModel):
 @router.get("")
 async def get_location():
     """获取当前位置（默认来自 config，或由前端上报的真实位置）"""
+    log.info("定位请求: get")
     return {"code": 0, "data": geolocation.get_location()}
 
 
 @router.post("")
 async def set_location(body: LocationIn):
     """上报用户真实位置（来自前端设备/网络定位）"""
+    log.info("定位请求: set source=%s", body.source)
     loc = geolocation.set_location(
         body.lat, body.lng, body.city, body.district, body.source
     )
@@ -89,6 +91,7 @@ async def detect_location():
         source=result.get("source", "backend"),
     )
 
+    log.info("后端自动定位成功: %s %s (source=%s)", new_city, new_district, result.get("source"))
     return {
         "code": 0,
         "data": {

@@ -2,12 +2,15 @@
 import { ref, computed, watch } from 'vue'
 import { useApiList } from '@/composables/useApi'
 import { useLocation } from '@/composables/useLocation'
+import { usePlaceVisits } from '@/composables/usePlaceVisits'
 import ResourceCard from '@/components/nearby/ResourceCard.vue'
+import NearbyNeedPanel from '@/components/nearby/NearbyNeedPanel.vue'
 import type { NearbyResource, NearbyCategory } from '@/types'
 
 const { list: categories } = useApiList<NearbyCategory>('/nearby/categories')
 const { list: resources, total, loading, fetch } = useApiList<NearbyResource>('/nearby/resources')
 const { updatedAt, refreshing, label: locationLabel, sourceLabel, locate } = useLocation()
+const { fetchSummary, applyVisitInfo } = usePlaceVisits()
 
 // 筛选状态（必须在 watch/函数之前声明，避免 TDZ 访问未初始化变量）
 const activeCategory = ref('all')
@@ -57,6 +60,11 @@ function fetchData() {
     keyword: keyword.value,
     sort: sortBy.value,
     radius: radius.value,
+  }).then(() => {
+    // 拉取后注入到店自标注信息（来过/好评/喜爱度）
+    if (resources.value.length) {
+      fetchSummary(resources.value).then((summary) => applyVisitInfo(resources.value, summary))
+    }
   })
 }
 
@@ -123,6 +131,9 @@ const dataSourceLabel = computed(() => {
         {{ refreshing ? '定位中…' : '刷新位置' }}
       </button>
     </div>
+
+    <!-- 需求中心：以用户需求为中心的交互入口 -->
+    <NearbyNeedPanel @open="openDetail" />
 
     <!-- 搜索和筛选栏 -->
     <div class="flex flex-wrap items-center gap-3 mb-4">

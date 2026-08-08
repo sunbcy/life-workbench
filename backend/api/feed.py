@@ -1,6 +1,9 @@
 """个性化推荐流 API 路由"""
+import logging
 from fastapi import APIRouter, Query
 from services.recommendation import get_engine
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/feed", tags=["个性化推荐"])
 
@@ -14,6 +17,7 @@ async def get_personalized_feed(
     统一个性化推荐流 - 混合新闻、商品、周边资源
     按 composite_score 降序排列
     """
+    log.info("推荐流请求: size=%s mix=%s", size, mix)
     engine = get_engine()
 
     # 收集所有类型的内容

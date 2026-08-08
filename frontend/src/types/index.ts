@@ -183,6 +183,28 @@ export interface NearbyCategory {
   icon: string
 }
 
+// ========== 需求中心交互类型 ==========
+export interface NeedStateOption {
+  key: string
+  label: string
+}
+
+export interface NeedContextInfo {
+  time_slot_label: string
+  location_label: string
+  user_state_labels: string[]
+}
+
+export interface NeedResponse {
+  code: number
+  data: NearbyResource[]
+  total: number
+  mode: 'local' | 'llm-semantic' | 'llm-fallback'
+  item_tags: string[]
+  reason: string
+  context: NeedContextInfo
+}
+
 export interface NearbyResource {
   id: number
   name: string
@@ -201,6 +223,21 @@ export interface NearbyResource {
   lng?: number
   source?: string
   _recommendation?: Recommendation
+  visit_info?: PlaceVisitInfo
+}
+
+// ========== 到店记录（用户对卡片自标注） ==========
+export interface PlaceVisitInfo {
+  visited: boolean
+  visited_at: string | null
+  not_visited: boolean
+  has_good_taste: boolean
+  has_bad_taste: boolean
+  love_score: number
+  love_level: 'love' | 'like' | 'neutral' | 'dislike' | 'skip'
+  note_count: number
+  last_note: string
+  last_taste: string
 }
 
 // ========== 新闻类型 ==========
@@ -225,6 +262,31 @@ export interface NewsArticle {
   trending: boolean
   link?: string
   _recommendation?: Recommendation
+  // 地理影响范围（维度一 & 二）
+  _geo?: { score: number; grain: string; scope_label: string; hit: string }
+  // AI 深度推荐（维度三）
+  _needs?: string[]
+  _ai_reason?: string
+  _need_score?: number
+}
+
+// AI 深度推荐：用户诉求解析
+export interface UserNeed {
+  topic: string
+  category: string
+  weight: number
+  reason: string
+}
+
+// 待接入渠道（前端「更多来源」入口，标注 pending）
+export interface NewsChannel {
+  id: string
+  name: string
+  icon: string
+  status: 'pending' | 'active'
+  note: string
+  category: string
+  example: string
 }
 
 export interface HotTag {

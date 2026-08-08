@@ -113,6 +113,13 @@ function formatReadCount(count: number): string {
         <!-- 标签 -->
         <div class="flex flex-wrap items-center gap-1.5 mt-2">
           <span
+            v-if="article._geo && article._geo.scope_label"
+            class="text-[9px] px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20"
+            :title="'地理影响范围评分 ' + (article._geo.score ?? 0)"
+          >
+            📍 {{ article._geo.scope_label }}
+          </span>
+          <span
             v-for="tag in article.tags"
             :key="tag"
             class="text-[9px] px-2 py-0.5 rounded-lg bg-primary-50 dark:bg-primary-500/10 text-primary-600 dark:text-primary-400"

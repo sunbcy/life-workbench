@@ -1,9 +1,12 @@
 """配置管理 API - 读取/保存本地 config.yaml 并热重载"""
+import logging
 from fastapi import APIRouter
 from pathlib import Path
 import yaml
 
 from services import get_config, reload_config
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/config", tags=["配置管理"])
 
@@ -13,6 +16,7 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
 @router.get("")
 async def get_config_api():
     """读取当前生效的本地配置（深拷贝，避免外部修改污染内存）"""
+    log.info("配置请求: get")
     cfg = get_config()
     import copy
     return {"code": 0, "data": copy.deepcopy(cfg)}
@@ -46,4 +50,5 @@ async def save_config_api(payload: dict):
         # 写文件成功但内存重载失败不应阻断保存
         pass
 
+    log.info("配置已保存并热重载")
     return {"code": 0, "message": "已保存并热重载", "config_path": str(CONFIG_PATH)}

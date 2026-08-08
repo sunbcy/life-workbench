@@ -3,11 +3,18 @@
 基于位置的生活比价与资源发现平台
 """
 import asyncio
+import time
+import logging
 import yaml
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from services.log_config import configure_logging
+
+log = logging.getLogger("life_workbench")
 
 from api.price_compare import router as price_router
 from api.nearby import router as nearby_router
@@ -18,6 +25,7 @@ from api.feed import router as feed_router
 from api.location import router as location_router
 from api.interest_map import router as interest_map_router
 from api.config import router as config_router
+from api.log import router as log_router
 from api.data import dashboard_stats, quick_actions
 from services.recommendation import get_engine
 
@@ -36,6 +44,10 @@ def load_config():
 
 
 config = load_config()
+
+# 初始化集中式日志（幂等，仅执行一次）
+configure_logging()
+log.info("应用启动 - 版本 %s", config["app"]["version"])
 
 
 @asynccontextmanager
@@ -80,6 +92,30 @@ app.include_router(feed_router)
 app.include_router(location_router)
 app.include_router(interest_map_router)
 app.include_router(config_router)
+app.include_router(log_router)
+
+
+# ========== 请求日志中间件（每个接口一行简洁日志） ==========
+class RequestLogMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = time.time()
+        response = await call_next(request)
+        cost_ms = (time.time() - start) * 1000
+        # 一行简洁日志：方法 路径[?查询参数] -> 状态码 耗时
+        # 附上 query 便于从日志直接看出请求了哪个分类/来源/关键词（调试视角）
+        query = request.url.query
+        path = request.url.path + (f"?{query}" if query else "")
+        log.info(
+            "%s %s -> %d (%.0fms)",
+            request.method,
+            path,
+            response.status_code,
+            cost_ms,
+        )
+        return response
+
+
+app.add_middleware(RequestLogMiddleware)
 
 # 初始化推荐引擎（启动时加载用户画像）
 # 注意：print 内容不要带 emoji，否则在 Windows GBK 终端会抛 UnicodeEncodeError 导致进程退出
